@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Service
+MimeType=application/gzip;application/x-compressed-tar;application/vnd.flatpak;
+Actions=openWithFlatpakManager;
+
+[Desktop Action openWithFlatpakManager]
+Name=Ouvrir avec Flatpak Manager
+Icon=flatpak-manager
+Exec=flatpak-manager %f

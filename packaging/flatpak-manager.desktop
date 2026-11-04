@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Flatpak Manager
+Comment=Créer et installer des Flatpak sans terminal
+Exec=flatpak-manager %f
+Icon=flatpak-manager
+Terminal=false
+Categories=System;Utility;
+MimeType=application/gzip;application/x-compressed-tar;application/vnd.flatpak;
