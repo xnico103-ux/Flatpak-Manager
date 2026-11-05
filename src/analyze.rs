@@ -47,10 +47,7 @@ impl Arch {
         }
     }
     pub fn matches_host(&self) -> bool {
-        match (self, std::env::consts::ARCH) {
-            (Arch::X86_64, "x86_64") | (Arch::Aarch64, "aarch64") => true,
-            _ => false,
-        }
+        matches!((self, std::env::consts::ARCH), (Arch::X86_64, "x86_64") | (Arch::Aarch64, "aarch64"))
     }
 }
 
@@ -392,6 +389,8 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     let mut build_raw: Vec<(Vec<String>, BuildFile)> = Vec::new();
     // Fichiers .rs / .go (peu profonds) : servent à vérifier qu'un projet produit bien un programme.
     let mut src_raw: Vec<Vec<String>> = Vec::new();
+    // Fichiers .jar : (chemin, chemin brut, taille).
+    let mut jar_raw: Vec<(Vec<String>, String, u64)> = Vec::new();
 
     let entries = ar.entries().context("lecture de l'archive")?;
     for entry in entries {
@@ -489,8 +488,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 gtk_bundled = true;
             }
         }
-        if (lower.ends_with(".rs") || lower.ends_with(".go")) && parts.len() <= 5 && src_raw.len() < 20_000 {
-            src_raw.push(parts.iter().map(|x| x.to_lowercase()).collect());
+        let vendored = parts.iter().any(|x| matches!(x.as_str(), "node_modules" | "site-packages" | ".git" | "venv" | ".venv"));
+        if [".rs", ".go", ".py", ".js", ".mjs", ".cjs"].iter().any(|e| lower.ends_with(e)) && parts.len() <= 5 && src_raw.len() < 20_000 && !vendored {
+            src_raw.push(parts.clone());
+        }
+        if lower.ends_with(".jar") && parts.len() <= 5 && jar_raw.len() < 200 {
+            jar_raw.push((parts.clone(), raw.raw.clone(), esize));
         }
         match lower.as_str() {
             "makefile" | "cmakelists.txt" | "configure" | "meson.build" | "cargo.toml" | "setup.py" | "pyproject.toml" => has_makefile = true,
@@ -629,7 +632,25 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     // Un ELF isolé au fond d'un projet (outil de test, bibliothèque fournie) ne fait pas de l'archive une application déjà compilée.
     let has_elf = executables.iter().any(|e| matches!(e.kind, ExecKind::Elf { .. }) && e.rel.split('/').count() <= 2 && e.score >= 10);
     let skip = if top_dir.is_some() { 1 } else { 0 };
-    let src_files: Vec<String> = src_raw.iter().filter(|p| p.len() > skip).map(|p| p[skip..].join("/")).collect();
+    let mut src_files: Vec<String> = src_raw.iter().filter(|p| p.len() > skip).map(|p| p[skip..].join("/")).collect();
+    // JAR : seuls ceux qui ont une classe principale (Main-Class) peuvent être lancés.
+    {
+        let mut jars: Vec<&(Vec<String>, String, u64)> = jar_raw.iter().filter(|(p, _, _)| p.len() > skip).collect();
+        jars.sort_by_key(|(p, _, _)| p.len());
+        for (p, raw, size) in jars.into_iter().take(8) {
+            let lowpath = p.join("/").to_lowercase();
+            if ["/lib/", "/libs/", "/dependency/", "/deps/", "sources", "javadoc", "-tests"].iter().any(|w| lowpath.contains(w)) && p.len() > skip + 1 {
+                continue;
+            }
+            let runnable = match read_member(path, raw, 64 << 20) {
+                Ok(data) if *size <= 64 << 20 => jar_has_main_class(&data).unwrap_or(true),
+                _ => true,
+            };
+            if runnable {
+                src_files.push(p[skip..].join("/"));
+            }
+        }
+    }
     let exec_names: Vec<String> = executables.iter().map(|e| e.rel.rsplit('/').next().unwrap_or("").to_lowercase()).collect();
     let detection = toolchains::detect(&root_build, &exec_names, has_elf, &guess_name, &src_files);
     let mut source: Option<SourceProject> = None;
@@ -674,12 +695,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         })
         .filter(|i| i.score > 0)
         .collect();
-    icons.sort_by(|a, b| b.score.cmp(&a.score));
+    icons.sort_by_key(|b| std::cmp::Reverse(b.score));
     icons.truncate(8);
 
     // Dossiers de bibliothèques embarquées
     let mut lib_dir_vec: Vec<(String, usize)> = lib_dirs.into_iter().collect();
-    lib_dir_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    lib_dir_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
     let lib_dirs: Vec<String> = lib_dir_vec
         .into_iter()
         .take(6)
@@ -711,7 +732,8 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     match kind {
         AppKind::Source => match (&source, unsupported_source) {
             (Some(p), _) => {
-                push(&mut findings, Severity::Info, &format!("Code source à compiler : {}", p.system.label()), "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes.");
+                let title = if p.system.compiles() { format!("Code source à compiler : {}", p.system.label()) } else { format!("Application {}", p.system.label()) };
+                push(&mut findings, Severity::Info, &title, p.system.intro());
                 if let Some(why) = &p.blocker {
                     push(&mut findings, Severity::Blocker, "Aucun programme à compiler", why.clone());
                 } else if !p.bin_certain {
@@ -721,11 +743,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                     push(&mut findings, Severity::Info, "Compilation", n.clone());
                 }
             }
-            (None, Some(lang)) => push(&mut findings, Severity::Blocker, &format!("Projet {lang} non pris en charge"), format!("Cette archive contient un projet {lang} à compiler ; seuls Rust, C/C++ et Go sont pris en charge pour l'instant.")),
-            (None, None) => push(&mut findings, Severity::Blocker, "Archive de sources", "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go)."),
+            (None, Some(lang)) => push(&mut findings, Severity::Blocker, &format!("Projet {lang} non pris en charge"), format!("Cette archive contient un projet {lang} ; seuls {} sont pris en charge pour l'instant.", toolchains::SUPPORTED_LANGS)),
+            (None, None) => push(&mut findings, Severity::Blocker, "Archive de sources", "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go, Python, Node.js, JAR)."),
         },
         AppKind::AppImage => push(&mut findings, Severity::Blocker, "AppImage détecté", "L'archive contient un AppImage. Ce format est déjà autonome ; il ne peut pas être converti directement."),
-        AppKind::Java => push(&mut findings, Severity::Blocker, "Application Java", "Les applications .jar nécessitent l'extension OpenJDK ; non prises en charge pour l'instant."),
+        AppKind::Java => push(&mut findings, Severity::Blocker, "Application Java", "Les fichiers .jar de cette archive n'ont pas de classe principale (Main-Class) : ce sont des bibliothèques, pas un programme qu'on peut lancer."),
         AppKind::Unknown => push(&mut findings, Severity::Blocker, "Aucun exécutable trouvé", "Impossible de repérer un programme exécutable dans cette archive."),
         _ => {}
     }
@@ -822,7 +844,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     }
     push(&mut findings, Severity::Info, "Contenu", format!("{count} fichiers, {} Mio décompressés.", unpacked >> 20));
     // Tri : blocages d'abord
-    findings.sort_by(|a, b| b.severity.cmp(&a.severity));
+    findings.sort_by_key(|b| std::cmp::Reverse(b.severity));
 
     let name = clean_name(&base_name);
     Ok(ArchiveInfo {
@@ -901,6 +923,44 @@ fn sniff_exec(head: &[u8]) -> Option<ExecKind> {
 }
 
 /// Lit un membre précis de l'archive en mémoire (borné).
+/// Vrai si le JAR déclare un `Main-Class` dans META-INF/MANIFEST.MF ; None si le fichier n'a pas pu être lu.
+fn jar_has_main_class(data: &[u8]) -> Option<bool> {
+    let u16le = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
+    let u32le = |o: usize| data.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    // Fin du répertoire central : signature PK\x05\x06 dans les 64 Kio finaux.
+    let tail_start = data.len().saturating_sub(65_557);
+    let eocd = (tail_start..data.len().checked_sub(22)? + 1).rev().find(|&i| data[i..].starts_with(&[0x50, 0x4b, 5, 6]))?;
+    let entries = u16le(eocd + 10)?;
+    let mut off = u32le(eocd + 16)?;
+    for _ in 0..entries {
+        if data.get(off..off + 4)? != [0x50, 0x4b, 1, 2] {
+            return None;
+        }
+        let (method, csize) = (u16le(off + 10)?, u32le(off + 20)?);
+        let (nlen, elen, clen) = (u16le(off + 28)?, u16le(off + 30)?, u16le(off + 32)?);
+        let lho = u32le(off + 42)?;
+        let name = data.get(off + 46..off + 46 + nlen)?;
+        if name.eq_ignore_ascii_case(b"META-INF/MANIFEST.MF") {
+            if data.get(lho..lho + 4)? != [0x50, 0x4b, 3, 4] {
+                return None;
+            }
+            let start = lho + 30 + u16le(lho + 26)? + u16le(lho + 28)?;
+            let comp = data.get(start..start + csize)?;
+            let mut text = String::new();
+            match method {
+                0 => text = String::from_utf8_lossy(comp).into_owned(),
+                8 => {
+                    flate2::read::DeflateDecoder::new(comp).take(1 << 20).read_to_string(&mut text).ok()?;
+                }
+                _ => return None,
+            }
+            return Some(text.lines().any(|l| l.trim_start().to_ascii_lowercase().starts_with("main-class:") && l.split(':').nth(1).is_some_and(|v| !v.trim().is_empty())));
+        }
+        off += 46 + nlen + elen + clen;
+    }
+    Some(false)
+}
+
 pub fn read_member(archive: &Path, raw: &str, max: u64) -> Result<Vec<u8>> {
     let mut ar = tar::Archive::new(open_decoder(archive)?.ok_or_else(|| anyhow!("format d'archive non reconnu"))?);
     for e in ar.entries()? {
@@ -1067,9 +1127,13 @@ mod tests {
     fn unsupported_or_unknown_sources_are_blocked() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "js.tar.gz", |b| add(b, "proj/package.json", b"{}", 0o644));
+        assert!(!analyze(&p).unwrap().is_compatible());
+        let p = build(d.path(), "rb.tar.gz", |b| add(b, "proj/Gemfile", b"source 'x'", 0o644));
         let i = analyze(&p).unwrap();
         assert!(!i.is_compatible());
-        assert!(i.blockers().any(|f| f.title.contains("Node.js")));
+        assert!(i.blockers().any(|f| f.title.contains("Ruby")));
+        let p = build(d.path(), "mvn.tar.gz", |b| add(b, "proj/pom.xml", b"<project/>", 0o644));
+        assert!(analyze(&p).unwrap().blockers().any(|f| f.title.contains("Maven")));
         let p = build(d.path(), "c.tar.gz", |b| add(b, "proj/main.c", b"int main(){}", 0o644));
         assert!(!analyze(&p).unwrap().is_compatible());
     }
@@ -1189,5 +1253,137 @@ mod tests {
         });
         let i = analyze(&p).unwrap();
         assert!(!i.is_compatible());
+    }
+
+    /// Petit JAR (méthode « stockée ») contenant seulement un MANIFEST.MF.
+    fn tiny_jar(manifest: &str) -> Vec<u8> {
+        let name = b"META-INF/MANIFEST.MF";
+        let data = manifest.as_bytes();
+        let mut z: Vec<u8> = Vec::new();
+        let le16 = |v: usize| (v as u16).to_le_bytes();
+        let le32 = |v: usize| (v as u32).to_le_bytes();
+        z.extend([0x50, 0x4b, 3, 4]);
+        z.extend([20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        z.extend(le32(data.len()));
+        z.extend(le32(data.len()));
+        z.extend(le16(name.len()));
+        z.extend([0, 0]);
+        z.extend(name);
+        z.extend(data);
+        let cd = z.len();
+        z.extend([0x50, 0x4b, 1, 2, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        z.extend(le32(data.len()));
+        z.extend(le32(data.len()));
+        z.extend(le16(name.len()));
+        z.extend([0; 12]);
+        z.extend(le32(0));
+        z.extend(name);
+        let cd_len = z.len() - cd;
+        z.extend([0x50, 0x4b, 5, 6, 0, 0, 0, 0, 1, 0, 1, 0]);
+        z.extend(le32(cd_len));
+        z.extend(le32(cd));
+        z.extend([0, 0]);
+        z
+    }
+
+    #[test]
+    fn jar_main_class_detection() {
+        assert_eq!(jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\nMain-Class: app.Main\n")), Some(true));
+        assert_eq!(jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\n")), Some(false));
+        assert_eq!(jar_has_main_class(b"pas un zip"), None);
+    }
+
+    #[test]
+    fn java_jar_with_main_class_is_supported() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "monjeu-1.0.tar.gz", |b| {
+            add(b, "monjeu-1.0/monjeu.jar", &tiny_jar("Main-Class: a.B\n"), 0o644);
+            add(b, "monjeu-1.0/lib/dep.jar", &tiny_jar("Manifest-Version: 1.0\n"), 0o644);
+        });
+        let i = analyze(&p).unwrap();
+        assert!(i.is_compatible(), "{:?}", i.findings);
+        let s = i.source.as_ref().unwrap();
+        assert_eq!(s.system, crate::toolchains::BuildSystem::Java);
+        assert_eq!(s.entry, crate::toolchains::Entry::File("monjeu.jar".into()));
+        let cfg = crate::manifest::BuildConfig::from_info(&i);
+        let launcher = cfg.launcher_script().unwrap();
+        assert!(launcher.contains("/app/jre/bin/java -jar '/app/opt/monjeu/monjeu.jar'"));
+        let m = cfg.manifest(&i, "icon.png", "256x256");
+        assert_eq!(m["sdk-extensions"][0], "org.freedesktop.Sdk.Extension.openjdk25");
+    }
+
+    #[test]
+    fn java_library_jar_is_blocked() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "lib.tar.gz", |b| {
+            add(b, "lib/lib.jar", &tiny_jar("Manifest-Version: 1.0\n"), 0o644);
+        });
+        let i = analyze(&p).unwrap();
+        assert!(!i.is_compatible());
+    }
+
+    #[test]
+    fn python_project_with_console_script() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "monoutil-2.0.tar.gz", |b| {
+            add(b, "monoutil-2.0/pyproject.toml", b"[build-system]\nrequires=[\"setuptools\"]\n[project]\nname=\"monoutil\"\ndependencies=[\"requests\"]\n[project.scripts]\nmonoutil-cli = \"monoutil.cli:main\"\n", 0o644);
+            add(b, "monoutil-2.0/monoutil/cli.py", b"def main(): pass", 0o644);
+        });
+        let i = analyze(&p).unwrap();
+        assert!(i.is_compatible(), "{:?}", i.findings);
+        let s = i.source.as_ref().unwrap();
+        assert_eq!(s.entry, crate::toolchains::Entry::Console("monoutil-cli".into()));
+        assert!(s.installable && s.network);
+        let cfg = crate::manifest::BuildConfig::from_info(&i);
+        assert!(cfg.perms.network);
+        let m = cfg.manifest(&i, "icon.png", "256x256");
+        let cmds = m["modules"][0]["build-commands"].to_string();
+        assert!(cmds.contains("pip3 install --prefix=/app/opt/monoutil"), "{cmds}");
+        assert!(cfg.launcher_script().unwrap().contains("/app/opt/monoutil/bin/monoutil-cli"));
+        assert!(m.get("sdk-extensions").is_none());
+    }
+
+    #[test]
+    fn python_loose_script_and_library() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "tool.tar.gz", |b| {
+            add(b, "tool/main.py", b"print('hi')", 0o644);
+            add(b, "tool/requirements.txt", b"pygobject\n", 0o644);
+            add(b, "tool/Makefile", b"test:\n", 0o644);
+        });
+        let i = analyze(&p).unwrap();
+        assert!(i.is_compatible(), "{:?}", i.findings);
+        let s = i.source.as_ref().unwrap();
+        assert_eq!((s.system, s.entry.clone(), s.requirements, s.gtk), (crate::toolchains::BuildSystem::Python, crate::toolchains::Entry::File("main.py".into()), true, true));
+        let cfg = crate::manifest::BuildConfig::from_info(&i);
+        assert_eq!(cfg.runtime, crate::manifest::RuntimeKind::Gnome);
+        let p = build(d.path(), "lib.tar.gz", |b| {
+            add(b, "lib/pyproject.toml", b"[project]\nname=\"lib\"\n", 0o644);
+            add(b, "lib/lib/__init__.py", b"", 0o644);
+        });
+        assert!(!analyze(&p).unwrap().is_compatible());
+    }
+
+    #[test]
+    fn node_project_entry_and_electron() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "srv.tar.gz", |b| {
+            add(b, "srv/package.json", b"{\"name\":\"@me/srv\",\"bin\":{\"srv\":\"./cli.js\"},\"scripts\":{\"build\":\"tsc\"},\"dependencies\":{\"express\":\"4\"}}", 0o644);
+            add(b, "srv/cli.js", b"#!/usr/bin/env node", 0o755);
+        });
+        let i = analyze(&p).unwrap();
+        assert!(i.is_compatible(), "{:?}", i.findings);
+        let s = i.source.as_ref().unwrap();
+        assert_eq!((s.bin_name.as_str(), s.entry.clone(), s.build_script, s.network), ("srv", crate::toolchains::Entry::File("cli.js".into()), true, true));
+        let cfg = crate::manifest::BuildConfig::from_info(&i);
+        let m = cfg.manifest(&i, "icon.png", "256x256");
+        let cmds = m["modules"][0]["build-commands"].to_string();
+        assert!(cmds.contains("npm run build") && cmds.contains("install.sh"), "{cmds}");
+        assert_eq!(m["sdk-extensions"][0], "org.freedesktop.Sdk.Extension.node24");
+        let p = build(d.path(), "el.tar.gz", |b| {
+            add(b, "el/package.json", b"{\"name\":\"el\",\"main\":\"main.js\",\"devDependencies\":{\"electron\":\"30\"}}", 0o644);
+            add(b, "el/main.js", b"", 0o644);
+        });
+        assert!(!analyze(&p).unwrap().is_compatible());
     }
 }

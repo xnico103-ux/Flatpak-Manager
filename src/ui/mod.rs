@@ -552,7 +552,10 @@ impl App {
     }
 
     fn start_run(&mut self, intent: Intent, out: PathBuf) {
-        let (Some(info), Some(cfg)) = (self.info.clone(), self.cfg.clone()) else { return };
+        let (Some(info), Some(mut cfg)) = (self.info.clone(), self.cfg.clone()) else { return };
+        if let (Some(src), Some(st)) = (cfg.source.as_mut(), self.tc.state.as_ref()) {
+            src.extension = toolchains::resolve_extension(src.system, &cfg.runtime_version, st);
+        }
         let mut opts = self.opts;
         opts.confirm_before_install = self.advanced && opts.confirm_before_install && intent == Intent::CreateInstall;
         let ctx = self.ctx.clone();
@@ -670,7 +673,7 @@ impl App {
                     self.tc.version_set = true;
                     if let Some(c) = &mut self.cfg
                         && c.source.is_some() && c.runtime == RuntimeKind::Freedesktop {
-                            c.runtime_version = toolchains::pick_branch(&state, c.source.as_ref().and_then(|s| s.system.extension()));
+                            c.runtime_version = toolchains::pick_branch(&state, c.source.as_ref().map(|s| s.system.extension_candidates()).unwrap_or(&[]));
                         }
                 }
                 self.tc.state = Some(state);
@@ -1083,6 +1086,21 @@ impl App {
                                 });
                                 ui.end_row();
                             }
+                            if let Some(src) = cfg.source.as_mut()
+                                && src.alternatives.len() > 1
+                            {
+                                ui.label(muted("Point d'entrée"));
+                                let cur = match &src.entry {
+                                    toolchains::Entry::File(f) => f.clone(),
+                                    _ => String::new(),
+                                };
+                                egui::ComboBox::from_id_salt("entry").selected_text(single_line_trunc(&cur, 26)).width(215.0).show_ui(ui, |ui| {
+                                    for a in src.alternatives.clone() {
+                                        ui.selectable_value(&mut src.entry, toolchains::Entry::File(a.clone()), &a);
+                                    }
+                                });
+                                ui.end_row();
+                            }
                             if advanced {
                                 ui.label(muted("Identifiant"));
                                 ui.vertical(|ui| {
@@ -1108,7 +1126,7 @@ impl App {
                                 ui.label(muted("Runtime"));
                                 ui.horizontal(|ui| {
                                     let before = cfg.runtime;
-                                    let fdo_only = cfg.source.as_ref().is_some_and(|s| s.system.extension().is_some());
+                                    let fdo_only = cfg.source.as_ref().is_some_and(|s| s.system.needs_fdo());
                                     egui::ComboBox::from_id_salt("runtime").selected_text(cfg.runtime.label()).width(150.0).show_ui(ui, |ui| {
                                         for r in RuntimeKind::ALL {
                                             if fdo_only && r != RuntimeKind::Freedesktop {

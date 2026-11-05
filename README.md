@@ -39,7 +39,10 @@ Aussi : sélecteur de fichiers natif, glisser-déposer, mode simple ou avancé, 
 |---|---|
 | Binaires précompilés et scripts (ELF ou script, avec ou sans bibliothèques) | Pris en charge |
 | Code source Rust, C/C++ et Go | Pris en charge |
-| AppImage, Java, Node.js, Python | Pas encore : l’analyse l’indique avant toute construction |
+| Projets Python (`pyproject.toml`, `setup.py`, `requirements.txt` ou simple `main.py`) | Pris en charge : dépendances installées avec pip |
+| Projets Node.js (`package.json`) | Pris en charge : dépendances installées avec npm, Node fourni par l’extension du SDK |
+| Applications Java (`.jar` exécutable, avec `Main-Class`) | Pris en charge : JRE fourni par l’extension OpenJDK |
+| Electron depuis les sources, Maven/Gradle, Ruby, PHP, Zig, Elixir, AppImage | Pas encore : l’analyse l’indique avant toute construction |
 
 Formats d’archive : `.tar.gz`, `.tar.xz`, `.tar.zst`, `.tar.bz2`.
 
@@ -53,7 +56,7 @@ Le projet est reconnu par ses fichiers de build : `Cargo.toml`, `CMakeLists.txt`
 
 La carte « Environnement de compilation » liste les composants requis, affiche la commande exacte pour installer ceux qui manquent (par exemple `flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//25.08`) et bloque la création tant qu’ils manquent.
 
-**Limites actuelles :** les dépendances (crates, modules Go) sont téléchargées pendant la compilation, le paquet n’est donc pas publiable tel quel sur Flathub ; Node.js et Python ne sont pas pris en charge.
+**Limites actuelles :** les dépendances (crates, modules Go, paquets pip et npm) sont téléchargées pendant la création, le paquet n’est donc pas publiable tel quel sur Flathub. Les extensions Node.js et OpenJDK existent en plusieurs versions : l’application choisit celle déjà installée, sinon la plus récente disponible. Le support Python, Node.js et Java est récent et n’a pas encore été éprouvé sur un vrai build Flathub.
 
 ## Installation
 
@@ -103,7 +106,7 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 | `src/history.rs` | historique (`~/.local/share/flatpak-manager/history.json`) |
 | `src/ui/` | interface egui |
 
-Tests : `cargo test` (36 tests).
+Tests : `cargo test` (42 tests).
 
 ## Logo
 

@@ -25,6 +25,10 @@ pub enum BuildSystem {
     Autotools,
     Make,
     Go,
+    Python,
+    Node,
+    /// Application Java déjà empaquetée (.jar exécutable) : rien à compiler, seul le JRE est ajouté.
+    Java,
 }
 
 impl BuildSystem {
@@ -36,32 +40,51 @@ impl BuildSystem {
             BuildSystem::Autotools => "C / C++ (Autotools)",
             BuildSystem::Make => "C / C++ (Makefile)",
             BuildSystem::Go => "Go",
+            BuildSystem::Python => "Python",
+            BuildSystem::Node => "Node.js",
+            BuildSystem::Java => "Java (JAR)",
         }
     }
 
-    /// Extension du SDK Freedesktop nécessaire (le C/C++ est déjà dans le SDK).
-    pub fn extension(&self) -> Option<&'static str> {
+    /// Extensions du SDK Freedesktop pouvant fournir l'outil, de la préférée à la moins préférée
+    /// (le C/C++ et Python sont déjà dans le SDK). Les identifiants proposés dépendent de la branche.
+    pub fn extension_candidates(&self) -> &'static [&'static str] {
         match self {
-            BuildSystem::Cargo => Some("org.freedesktop.Sdk.Extension.rust-stable"),
-            BuildSystem::Go => Some("org.freedesktop.Sdk.Extension.golang"),
-            _ => None,
+            BuildSystem::Cargo => &["org.freedesktop.Sdk.Extension.rust-stable"],
+            BuildSystem::Go => &["org.freedesktop.Sdk.Extension.golang"],
+            BuildSystem::Node => &["org.freedesktop.Sdk.Extension.node24", "org.freedesktop.Sdk.Extension.node22", "org.freedesktop.Sdk.Extension.node20"],
+            BuildSystem::Java => &["org.freedesktop.Sdk.Extension.openjdk25", "org.freedesktop.Sdk.Extension.openjdk21", "org.freedesktop.Sdk.Extension.openjdk"],
+            _ => &[],
         }
+    }
+
+    /// Vrai si une extension n'existe que pour le SDK Freedesktop (le runtime est alors imposé).
+    pub fn needs_fdo(&self) -> bool {
+        !self.extension_candidates().is_empty()
     }
 
     pub fn extension_label(&self) -> &'static str {
         match self {
             BuildSystem::Cargo => "Extension Rust (rustc, cargo)",
             BuildSystem::Go => "Extension Go",
+            BuildSystem::Node => "Extension Node.js",
+            BuildSystem::Java => "Extension OpenJDK (Java)",
             _ => "",
         }
     }
 
-    /// Chemin des outils de l'extension à l'intérieur du SDK.
-    pub fn extension_bin(&self) -> Option<&'static str> {
+    /// Vrai si le projet est compilé ; faux pour Java (JAR déjà construit).
+    pub fn compiles(&self) -> bool {
+        !matches!(self, BuildSystem::Java)
+    }
+
+    /// Phrase d'introduction affichée dans l'analyse.
+    pub fn intro(&self) -> &'static str {
         match self {
-            BuildSystem::Cargo => Some("/usr/lib/sdk/rust-stable/bin"),
-            BuildSystem::Go => Some("/usr/lib/sdk/golang/bin"),
-            _ => None,
+            BuildSystem::Python => "Les dépendances Python seront installées dans le bac à sable Flatpak (pip) puis le programme sera empaqueté avec l'interpréteur du runtime.",
+            BuildSystem::Node => "Les dépendances seront installées (npm) dans le bac à sable Flatpak, puis le programme sera empaqueté avec Node.js fourni par l'extension du SDK.",
+            BuildSystem::Java => "Ce programme Java est déjà construit : il sera empaqueté tel quel avec un environnement Java (JRE) fourni par l'extension OpenJDK.",
+            _ => "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes.",
         }
     }
 
@@ -74,8 +97,29 @@ impl BuildSystem {
             BuildSystem::Autotools => &[("gcc", &["--version"]), ("make", &["--version"])],
             BuildSystem::Make => &[("gcc", &["--version"]), ("make", &["--version"])],
             BuildSystem::Go => &[("go", &["version"])],
+            BuildSystem::Python => &[("python3", &["--version"]), ("pip3", &["--version"])],
+            BuildSystem::Node => &[("node", &["--version"]), ("npm", &["--version"])],
+            BuildSystem::Java => &[("java", &["--version"])],
         }
     }
+}
+
+/// Dossier d'une extension du SDK : `/usr/lib/sdk/<fin de l'identifiant>`.
+pub fn extension_dir(id: &str) -> String {
+    format!("/usr/lib/sdk/{}", id.rsplit('.').next().unwrap_or(id))
+}
+
+/// Point d'entrée d'un projet (ce que le script de lancement exécute).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Entry {
+    #[default]
+    None,
+    /// Fichier du projet (chemin relatif à la racine) : script Python, point d'entrée Node.js ou JAR.
+    File(String),
+    /// Commande installée par pip (`[project.scripts]`).
+    Console(String),
+    /// Module Python lancé par `python3 -m`.
+    Module(String),
 }
 
 #[derive(Debug, Clone)]
@@ -85,11 +129,23 @@ pub struct SourceProject {
     /// Vrai si le nom du binaire a été lu dans les fichiers du projet (et non deviné).
     pub bin_certain: bool,
     pub gui: bool,
+    /// Accès réseau probablement nécessaire à l'exécution.
+    pub network: bool,
     pub qt: bool,
     pub gtk: bool,
     pub notes: Vec<String>,
     /// Raison pour laquelle le projet ne produit visiblement aucun programme (bibliothèque seule…).
     pub blocker: Option<String>,
+    /// Python, Node.js, Java : ce que le script de lancement exécute.
+    pub entry: Entry,
+    /// Autres fichiers possibles pour le point d'entrée (choix proposé à l'utilisateur).
+    pub alternatives: Vec<String>,
+    /// Python : le projet s'installe avec pip (pyproject.toml, setup.py).
+    pub installable: bool,
+    /// Python : un fichier requirements.txt est présent.
+    pub requirements: bool,
+    /// Node.js : package.json définit un script « build » à lancer.
+    pub build_script: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,7 +156,7 @@ pub struct BuildFile {
 }
 
 /// Noms de fichiers (en minuscules) dont le contenu est lu pendant l'analyse.
-pub const BUILD_FILE_NAMES: [&str; 12] = [
+pub const BUILD_FILE_NAMES: &[&str] = &[
     "cargo.toml",
     "go.mod",
     "meson.build",
@@ -113,7 +169,31 @@ pub const BUILD_FILE_NAMES: [&str; 12] = [
     "gnumakefile",
     "package.json",
     "setup.py",
+    "setup.cfg",
+    "pyproject.toml",
+    "requirements.txt",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "gemfile",
+    "composer.json",
+    "build.zig",
+    "mix.exs",
 ];
+
+/// Projets reconnus mais pas encore pris en charge : (fichier, langage).
+const UNSUPPORTED: &[(&str, &str)] = &[
+    ("pom.xml", "Java (Maven)"),
+    ("build.gradle", "Java (Gradle)"),
+    ("build.gradle.kts", "Java (Gradle)"),
+    ("gemfile", "Ruby"),
+    ("composer.json", "PHP"),
+    ("build.zig", "Zig"),
+    ("mix.exs", "Elixir"),
+];
+
+/// Langages pris en charge, pour les messages.
+pub const SUPPORTED_LANGS: &str = "Rust, C/C++, Go, Python, Node.js et Java (JAR)";
 
 #[derive(Debug, Clone)]
 pub enum Detection {
@@ -165,16 +245,23 @@ fn project(system: BuildSystem, bin: (String, bool), content: &str, gui_words: &
         bin_name: bin.0,
         bin_certain: bin.1,
         gui: any_of(content, gui_words),
+        network: false,
         qt: any_of(content, &["qt5", "qt6", "find_package(qt", "dependency('qt", "dependency(\"qt"]),
         gtk: any_of(content, &["gtk+-3", "gtk4", "gtk3", "find_package(gtk", "dependency('gtk", "dependency(\"gtk"]),
         notes: vec![],
         blocker: None,
+        entry: Entry::None,
+        alternatives: vec![],
+        installable: false,
+        requirements: false,
+        build_script: false,
     }
 }
 
 const GUI_NATIVE: [&str; 9] = ["qt5", "qt6", "gtk", "sdl2", "sdl3", "sfml", "glfw", "wxwidgets", "raylib"];
 
-/// `src_files` : chemins (relatifs à la racine du projet, en minuscules) des fichiers .rs et .go de l'archive.
+/// `src_files` : chemins (relatifs à la racine du projet, casse d'origine) des fichiers .rs, .go, .py, .js
+/// et des .jar exécutables de l'archive.
 pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallback_name: &str, src_files: &[String]) -> Option<Detection> {
     if has_elf {
         return None;
@@ -194,7 +281,10 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
             segs.last().map(|s| s.to_string())
         });
         let mut bin = pick(name, fallback_name);
-        let has_main = src_files.iter().any(|x| x == "main.go" || x.starts_with("cmd/"));
+        let has_main = src_files.iter().any(|x| {
+            let l = x.to_ascii_lowercase();
+            l == "main.go" || l.starts_with("cmd/")
+        });
         if !has_main {
             bin.1 = false;
         }
@@ -247,6 +337,24 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
         }
         return Some(Detection::Supported(p));
     }
+    // Langages interprétés : seul un script .sh de lancement fait passer l'archive pour une application à base de script
+    // (les autres exécutables, comme bin/outil ou setup.py, sont des fichiers du projet lui-même).
+    if !exec_names.iter().any(|n| n.ends_with(".sh")) {
+        let has_js = src_files.iter().any(|p| is_js(p));
+        let root_make = get("makefile").or_else(|| get("gnumakefile")).is_some();
+        if let Some(f) = get("package.json")
+            && (has_js || !root_make)
+        {
+            return Some(Detection::Supported(node(f, fallback_name, src_files)));
+        }
+        if let Some(p) = python(files, fallback_name, src_files, root_make) {
+            return Some(Detection::Supported(p));
+        }
+        let jars: Vec<String> = src_files.iter().filter(|p| p.to_ascii_lowercase().ends_with(".jar")).cloned().collect();
+        if !jars.is_empty() {
+            return Some(Detection::Supported(java(&jars, fallback_name)));
+        }
+    }
     if exec_names.is_empty() {
         if let Some(f) = get("makefile").or_else(|| get("gnumakefile")) {
             let name = f.content.lines().find_map(|l| {
@@ -265,14 +373,340 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
             }
             return Some(Detection::Supported(p));
         }
-        if get("package.json").is_some() {
-            return Some(Detection::Unsupported("Node.js"));
-        }
-        if get("setup.py").is_some() {
-            return Some(Detection::Unsupported("Python"));
+        for (file, lang) in UNSUPPORTED {
+            if get(file).is_some() {
+                return Some(Detection::Unsupported(lang));
+            }
         }
     }
     None
+}
+
+fn is_js(p: &str) -> bool {
+    let l = p.to_ascii_lowercase();
+    l.ends_with(".js") || l.ends_with(".mjs") || l.ends_with(".cjs")
+}
+
+/// Chemin sans « ./ » initial.
+fn clean_rel(p: &str) -> String {
+    p.trim().trim_start_matches("./").to_string()
+}
+
+fn root_names(src: &[String], ext: fn(&str) -> bool) -> Vec<&String> {
+    src.iter().filter(|p| !p.contains('/') && ext(p)).collect()
+}
+
+fn find_ci<'a>(list: &[&'a String], name: &str) -> Option<&'a String> {
+    list.iter().find(|p| p.eq_ignore_ascii_case(name)).copied()
+}
+
+fn contains_any(text: &str, words: &[&str]) -> bool {
+    any_of(text, words)
+}
+
+// ---------------------------------------------------------------- Node.js
+
+fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
+    let json: Option<serde_json::Value> = serde_json::from_str(&f.content).ok();
+    let text = |k: &str| json.as_ref().and_then(|j| j.get(k)).and_then(|v| v.as_str()).map(String::from);
+    let pkg_name = text("name").map(|n| n.rsplit('/').next().unwrap_or("").to_string()).filter(|n| !n.is_empty());
+    let dep_keys: Vec<String> = ["dependencies", "devDependencies", "optionalDependencies"]
+        .iter()
+        .filter_map(|k| json.as_ref().and_then(|j| j.get(*k)).and_then(|v| v.as_object()))
+        .flat_map(|o| o.keys().cloned())
+        .collect();
+    let electron = dep_keys.iter().any(|d| d == "electron");
+    let scripts = json.as_ref().and_then(|j| j.get("scripts")).and_then(|v| v.as_object());
+    let build_script = scripts.is_some_and(|s| s.contains_key("build"));
+    let start = scripts.and_then(|s| s.get("start")).and_then(|v| v.as_str()).map(String::from);
+
+    // Fichier à lancer : « bin », puis « main », puis « scripts.start » (node fichier.js), puis des noms usuels.
+    let mut bin_key: Option<String> = None;
+    let mut entry: Option<String> = None;
+    if let Some(b) = json.as_ref().and_then(|j| j.get("bin")) {
+        if let Some(path) = b.as_str() {
+            entry = Some(clean_rel(path));
+        } else if let Some(o) = b.as_object() {
+            let pick_key = pkg_name.as_ref().filter(|n| o.contains_key(*n)).cloned().or_else(|| o.keys().next().cloned());
+            if let Some(k) = pick_key {
+                entry = o.get(&k).and_then(|v| v.as_str()).map(clean_rel);
+                bin_key = Some(k);
+            }
+        }
+    }
+    if entry.is_none() {
+        entry = text("main").map(|m| clean_rel(&m));
+    }
+    if entry.is_none()
+        && let Some(st) = &start
+    {
+        let toks: Vec<&str> = st.split_whitespace().collect();
+        if let Some(i) = toks.iter().position(|t| *t == "node")
+            && let Some(file) = toks[i + 1..].iter().find(|t| !t.starts_with('-'))
+            && *file != "."
+        {
+            entry = Some(clean_rel(file));
+        }
+    }
+    let roots = root_names(src, is_js);
+    if entry.as_deref().is_none_or(|e| e.is_empty() || e == ".") {
+        entry = ["index.js", "server.js", "app.js", "main.js", "cli.js", "index.mjs", "main.mjs"].iter().find_map(|c| find_ci(&roots, c).cloned());
+    }
+    let mut alternatives: Vec<String> = roots.iter().map(|s| (*s).clone()).collect();
+    if let Some(e) = &entry
+        && !alternatives.contains(e)
+    {
+        alternatives.insert(0, e.clone());
+    }
+    if alternatives.len() < 2 {
+        alternatives.clear();
+    }
+
+    let name = bin_key.or(pkg_name);
+    let (bin, _) = pick(name, fallback);
+    let mut p = project(BuildSystem::Node, (bin, true), "", &[]);
+    p.build_script = build_script;
+    p.alternatives = alternatives;
+    p.entry = entry.clone().map(Entry::File).unwrap_or_default();
+    p.notes.push("Les dépendances npm sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).".into());
+    if build_script {
+        p.notes.push("Le script « build » de package.json sera exécuté avant l'empaquetage.".into());
+    }
+    if electron {
+        p.blocker = Some("Ce projet utilise Electron : sa construction depuis les sources n'est pas prise en charge. Utilisez plutôt l'archive de l'application déjà compilée (celle que le projet distribue pour Linux).".into());
+    } else if entry.is_none() {
+        p.blocker = Some("Aucun point d'entrée Node.js trouvé (ni « bin », ni « main », ni « scripts.start », ni index.js) : il n'y a rien à lancer.".into());
+    } else if let Some(e) = &entry
+        && !build_script
+        && !src.iter().any(|s| s.eq_ignore_ascii_case(e))
+        && !e.contains('/')
+    {
+        p.notes.push(format!("Le fichier « {e} » n'a pas été repéré à la racine de l'archive ; vérifiez-le dans « Point d'entrée »."));
+    }
+    let net = ["express", "fastify", "koa", "axios", "node-fetch", "got", "undici", "ws", "socket.io", "discord.js", "telegraf", "next", "nuxt", "request"];
+    p.network = dep_keys.iter().any(|d| net.contains(&d.as_str()));
+    p
+}
+
+// ---------------------------------------------------------------- Python
+
+fn toml_path<'a>(t: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Value> {
+    let mut cur = t.get(*path.first()?)?;
+    for k in &path[1..] {
+        cur = cur.get(k)?;
+    }
+    Some(cur)
+}
+
+/// Valeur entre guillemets qui suit `name=` ou `name =` (setup.py).
+fn py_kwarg(text: &str, key: &str) -> Option<String> {
+    let mut from = 0;
+    while let Some(i) = text[from..].find(key) {
+        let start = from + i;
+        from = start + key.len();
+        let before_ok = start == 0 || !(text.as_bytes()[start - 1].is_ascii_alphanumeric() || text.as_bytes()[start - 1] == b'_');
+        let rest = text[from..].trim_start();
+        if before_ok && let Some(rest) = rest.strip_prefix('=') {
+            let rest = rest.trim_start();
+            if let Some(q) = rest.chars().next().filter(|c| matches!(c, '\'' | '"')) {
+                let val: String = rest[1..].chars().take_while(|c| *c != q && *c != '\n').collect();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Commandes déclarées dans setup.py (`console_scripts`, `gui_scripts`) et setup.cfg (`[options.entry_points]`).
+fn setup_scripts(setup_py: &str, setup_cfg: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |name: &str| {
+        let n = name.trim();
+        if valid_bin(n) && !out.iter().any(|x| x == n) {
+            out.push(n.to_string());
+        }
+    };
+    for key in ["gui_scripts", "console_scripts"] {
+        let mut from = 0;
+        while let Some(i) = setup_py[from..].find(key) {
+            let start = from + i + key.len();
+            from = start;
+            let mut end = (start + 600).min(setup_py.len());
+            while !setup_py.is_char_boundary(end) {
+                end -= 1;
+            }
+            let window = &setup_py[start..end];
+            let window = window.split(']').next().unwrap_or(window);
+            for (n, seg) in window.split(['\'', '"']).enumerate() {
+                if n % 2 == 1
+                    && let Some((name, target)) = seg.split_once('=')
+                    && target.contains(':')
+                {
+                    add(name);
+                }
+            }
+        }
+    }
+    let mut inside = false;
+    for line in setup_cfg.lines() {
+        let t = line.trim();
+        if t.starts_with("console_scripts") || t.starts_with("gui_scripts") {
+            inside = true;
+            continue;
+        }
+        if inside {
+            if t.is_empty() || !line.starts_with([' ', '\t']) {
+                inside = false;
+                continue;
+            }
+            if let Some((name, target)) = t.split_once('=')
+                && target.contains(':')
+            {
+                add(name);
+            }
+        }
+    }
+    out
+}
+
+fn valid_module(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.')) && !s.starts_with(|c: char| c.is_ascii_digit())
+}
+
+fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) -> Option<SourceProject> {
+    let get = |n: &str| files.iter().find(|f| f.name == n);
+    let pyproject = get("pyproject.toml");
+    let setup_py = get("setup.py");
+    let setup_cfg = get("setup.cfg");
+    let reqs = get("requirements.txt");
+    let table: Option<toml::Table> = pyproject.and_then(|f| f.content.parse().ok());
+    let has = |path: &[&str]| table.as_ref().and_then(|t| toml_path(t, path)).is_some();
+    let installable = has(&["build-system"]) || has(&["project"]) || has(&["tool", "poetry"]) || setup_py.is_some() || setup_cfg.is_some();
+
+    let is_py = |p: &str| p.to_ascii_lowercase().ends_with(".py");
+    let root_py = root_names(src, is_py);
+    let loose = ["main.py", "__main__.py", "app.py", "run.py"].iter().find_map(|c| find_ci(&root_py, c).cloned());
+    let helper = |p: &&String| !matches!(p.to_ascii_lowercase().as_str(), "setup.py" | "conftest.py");
+    let candidates: Vec<&String> = root_py.iter().copied().filter(helper).collect();
+    let only = if candidates.len() == 1 { Some(candidates[0].clone()) } else { None };
+    if !installable && loose.is_none() && !(reqs.is_some() && only.is_some()) {
+        return None;
+    }
+    // Un Makefile à la racine et rien de propre à Python : c'est sans doute un projet C.
+    if root_make && !installable && loose.is_none() {
+        return None;
+    }
+
+    let proj_name = table
+        .as_ref()
+        .and_then(|t| toml_path(t, &["project", "name"]).or_else(|| toml_path(t, &["tool", "poetry", "name"])))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| setup_py.and_then(|f| py_kwarg(&f.content, "name")));
+
+    let mut scripts: Vec<String> = Vec::new();
+    if let Some(t) = &table {
+        for path in [&["project", "gui-scripts"][..], &["project", "scripts"][..], &["tool", "poetry", "scripts"][..]] {
+            if let Some(tbl) = toml_path(t, path).and_then(|v| v.as_table()) {
+                scripts.extend(tbl.keys().filter(|k| valid_bin(k)).cloned());
+            }
+        }
+    }
+    for n in setup_scripts(setup_py.map(|f| f.content.as_str()).unwrap_or(""), setup_cfg.map(|f| f.content.as_str()).unwrap_or("")) {
+        if !scripts.contains(&n) {
+            scripts.push(n);
+        }
+    }
+    // Un script portant le nom du projet est le plus probable.
+    if let Some(n) = &proj_name
+        && let Some(i) = scripts.iter().position(|s| s == n)
+    {
+        let s = scripts.remove(i);
+        scripts.insert(0, s);
+    }
+
+    // Module lançable (`python3 -m paquet`) : pkg/__main__.py ou src/pkg/__main__.py
+    let module = src.iter().find_map(|p| {
+        let parts: Vec<&str> = p.split('/').collect();
+        let ok = |m: &str| valid_module(m).then(|| m.to_string());
+        match parts.as_slice() {
+            [m, f] if f.eq_ignore_ascii_case("__main__.py") => ok(m),
+            ["src", m, f] if f.eq_ignore_ascii_case("__main__.py") => ok(m),
+            _ => None,
+        }
+    });
+
+    let mut entry = Entry::None;
+    let mut bin_src = proj_name.clone();
+    if installable && let Some(c) = scripts.first() {
+        entry = Entry::Console(c.clone());
+        bin_src = Some(c.clone());
+    } else if installable && let Some(m) = &module {
+        entry = Entry::Module(m.clone());
+    } else if let Some(l) = loose.or(only) {
+        entry = Entry::File(l);
+    }
+
+    let mut blob = String::new();
+    for f in [pyproject, setup_py, setup_cfg, reqs].into_iter().flatten() {
+        blob.push_str(&f.content);
+        blob.push('\n');
+    }
+    let (bin, _) = pick(bin_src.map(|n| slugify(&n)), fallback);
+    let mut p = project(BuildSystem::Python, (bin, true), "", &[]);
+    p.gui = contains_any(&blob, &["pyqt5", "pyqt6", "pyside2", "pyside6", "pygobject", "tkinter", "customtkinter", "pygame", "kivy", "wxpython", "dearpygui", "flet", "pyglet", "arcade", "toga", "textual-web"]);
+    p.gtk = contains_any(&blob, &["pygobject"]);
+    p.installable = installable;
+    p.requirements = reqs.is_some();
+    p.network = contains_any(&blob, &["requests", "httpx", "aiohttp", "urllib3", "flask", "django", "fastapi", "tornado", "websockets", "discord", "telegram", "pycurl", "paramiko"]);
+    if matches!(entry, Entry::File(_)) {
+        let mut alts: Vec<String> = candidates.iter().map(|s| (*s).clone()).collect();
+        if let Entry::File(e) = &entry
+            && !alts.contains(e)
+        {
+            alts.insert(0, e.clone());
+        }
+        if alts.len() > 1 {
+            p.alternatives = alts;
+        }
+    }
+    if matches!(entry, Entry::None) {
+        p.blocker = Some(if installable {
+            "Ce projet Python n'installe aucune commande (pas de [project.scripts]) et n'a ni __main__.py ni main.py : c'est une bibliothèque, il n'y a rien à lancer.".into()
+        } else {
+            "Aucun point d'entrée Python trouvé (main.py, __main__.py, app.py ou run.py à la racine).".into()
+        });
+    }
+    p.entry = entry;
+    if !installable && reqs.is_none() {
+        p.notes.push("Aucun requirements.txt ni pyproject.toml : seules les bibliothèques standard de Python seront disponibles.".into());
+    }
+    p.notes.push("Les dépendances Python sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).".into());
+    if contains_any(&blob, &["tkinter", "customtkinter"]) {
+        p.notes.push("Tkinter n'est pas toujours fourni par le runtime : si la fenêtre ne s'ouvre pas, ce projet n'est sans doute pas adapté.".into());
+    }
+    Some(p)
+}
+
+// ---------------------------------------------------------------- Java
+
+fn java(jars: &[String], fallback: &str) -> SourceProject {
+    let slug = slugify(fallback);
+    let mut sorted = jars.to_vec();
+    sorted.sort_by_key(|p| (p.matches('/').count(), !p.to_ascii_lowercase().contains(&slug), p.len(), p.clone()));
+    let main = sorted[0].clone();
+    let (bin, _) = pick(Some(slug), fallback);
+    let mut p = project(BuildSystem::Java, (bin, true), "", &[]);
+    // Swing, JavaFX et SWT sont des bibliothèques de fenêtres : l'écran est accordé par défaut, à retirer pour un outil en ligne de commande.
+    p.gui = true;
+    p.entry = Entry::File(main);
+    if sorted.len() > 1 {
+        p.alternatives = sorted;
+    }
+    p.notes.push("Application graphique supposée : pour un outil en ligne de commande, cochez « Ouvrir dans un terminal » en mode avancé.".into());
+    p
 }
 
 fn cargo(f: &BuildFile, fallback: &str, src_files: &[String]) -> SourceProject {
@@ -292,7 +726,10 @@ fn cargo(f: &BuildFile, fallback: &str, src_files: &[String]) -> SourceProject {
     let certain = name.is_some() && !workspace;
     let (n, _) = pick(name, fallback);
     let mut p = project(BuildSystem::Cargo, (n, certain), &f.content, &["eframe", "egui", "iced", "slint", "gtk4", "relm4", "tauri", "fltk", "floem", "winit", "sdl2", "bevy", "macroquad"]);
-    let has_bin_file = src_files.iter().any(|x| x == "src/main.rs" || x.starts_with("src/bin/"));
+    let has_bin_file = src_files.iter().any(|x| {
+        let l = x.to_ascii_lowercase();
+        l == "src/main.rs" || l.starts_with("src/bin/")
+    });
     if !workspace && bins.is_empty() && !has_bin_file {
         p.blocker = Some("Ce projet Rust ne contient pas de programme (ni src/main.rs, ni section [[bin]]) : c'est une bibliothèque, il n'y a rien à lancer.".into());
     }
@@ -379,18 +816,31 @@ fn version_key(v: &str) -> Vec<u32> {
     v.split('.').map(|x| x.parse().unwrap_or(0)).collect()
 }
 
+fn offered(state: &FlatpakState, id: &str, branch: &str) -> bool {
+    state.has(id, branch) || state.remote.iter().any(|(i, b)| i == id && b == branch)
+}
+
+/// Extension à utiliser sur la branche `version` : une extension déjà installée, sinon la plus récente
+/// proposée par Flathub, sinon la préférée (qui sera à installer).
+pub fn resolve_extension(system: BuildSystem, version: &str, state: &FlatpakState) -> Option<String> {
+    let c = system.extension_candidates();
+    c.iter()
+        .find(|id| state.has(id, version))
+        .or_else(|| c.iter().find(|id| offered(state, id, version)))
+        .or(c.first())
+        .map(|s| s.to_string())
+}
+
 /// Branche du SDK Freedesktop à utiliser : la plus récente disponible (installée ou sur Flathub)
-/// qui propose à la fois le runtime, le SDK et l'extension nécessaire (`ext`).
+/// qui propose le runtime, le SDK et au moins une des extensions `exts` (vide : aucune exigée).
 /// Les anciennes branches ont des compilateurs figés (ex. Rust 1.89 en 24.08).
-pub fn pick_branch(state: &FlatpakState, ext: Option<&str>) -> String {
+pub fn pick_branch(state: &FlatpakState, exts: &[&str]) -> String {
     let numeric = |b: &str| !b.is_empty() && b.split('.').all(|x| x.parse::<u32>().is_ok());
-    let offered = |id: &str, b: &str| state.has(id, b) || state.remote.iter().any(|(i, br)| i == id && br == b);
-    let mut ids = vec!["org.freedesktop.Platform", "org.freedesktop.Sdk"];
-    ids.extend(ext);
     let mut best = FDO_VERSION.to_string();
     let candidates = state.refs.iter().chain(state.remote.iter()).filter(|(i, _)| i == "org.freedesktop.Sdk").map(|(_, b)| b.clone());
     for b in candidates {
-        if numeric(&b) && version_key(&b) > version_key(&best) && ids.iter().all(|id| offered(id, &b)) {
+        let ok = offered(state, "org.freedesktop.Platform", &b) && offered(state, "org.freedesktop.Sdk", &b) && (exts.is_empty() || exts.iter().any(|e| offered(state, e, &b)));
+        if numeric(&b) && version_key(&b) > version_key(&best) && ok {
             best = b;
         }
     }
@@ -446,8 +896,8 @@ pub fn components(system: BuildSystem, runtime: RuntimeKind, version: &str, stat
         (runtime.platform().to_string(), "Runtime d'exécution"),
         (runtime.sdk().to_string(), "SDK (compilateurs et outils de build)"),
     ];
-    if let Some(e) = system.extension() {
-        v.push((e.to_string(), system.extension_label()));
+    if let Some(e) = resolve_extension(system, version, state) {
+        v.push((e, system.extension_label()));
     }
     v.into_iter().map(|(id, label)| Component { installed: state.has(&id, version), id, branch: version.to_string(), label: label.to_string() }).collect()
 }
@@ -622,7 +1072,9 @@ mod tests {
         assert!(detect(std::slice::from_ref(&f), &[], true, "x", &[]).is_none());
         assert!(detect(&[f], &["run.sh".into()], false, "x", &[]).is_none());
         let f = bf("package.json", "{}");
-        assert!(matches!(detect(std::slice::from_ref(&f), &[], false, "x", &[]), Some(Detection::Unsupported("Node.js"))));
+        // package.json sans aucun point d'entrée : projet Node.js reconnu mais sans rien à lancer.
+        let Some(Detection::Supported(p)) = detect(std::slice::from_ref(&f), &[], false, "x", &[]) else { panic!() };
+        assert!(p.blocker.is_some());
         assert!(detect(&[f], &["start.sh".into()], false, "x", &[]).is_none());
     }
 
@@ -630,7 +1082,7 @@ mod tests {
     fn branch_and_components() {
         let refs = parse_refs("org.freedesktop.Platform\t24.08\norg.freedesktop.Sdk\t24.08\norg.freedesktop.Sdk\t23.08\norg.gnome.Platform\t49\n");
         let st = FlatpakState { available: true, refs, has_flathub: true, remote: vec![], user_refs: vec![] };
-        assert_eq!(pick_branch(&st, None), FDO_VERSION);
+        assert_eq!(pick_branch(&st, &[]), FDO_VERSION);
         let comps = components(BuildSystem::Cargo, RuntimeKind::Freedesktop, "24.08", &st);
         assert_eq!(comps.len(), 3);
         let miss = missing(&comps);
@@ -642,7 +1094,7 @@ mod tests {
         let plan = install_plan(&miss, false);
         assert_eq!(plan.len(), 2);
         assert!(shell_line(&plan[0]).starts_with("flatpak remote-add --user --if-not-exists flathub https://"));
-        assert_eq!(pick_branch(&FlatpakState::default(), None), FDO_VERSION);
+        assert_eq!(pick_branch(&FlatpakState::default(), &[]), FDO_VERSION);
         // C/C++ : pas d'extension
         assert_eq!(components(BuildSystem::CMake, RuntimeKind::Freedesktop, "25.08", &st).len(), 2);
     }
@@ -652,9 +1104,9 @@ mod tests {
         let mut st = FlatpakState { refs: parse_refs("org.freedesktop.Sdk\t24.08\n"), ..Default::default() };
         st.remote = parse_refs("org.freedesktop.Platform\t26.08\norg.freedesktop.Sdk\t26.08\norg.freedesktop.Platform\t25.08\norg.freedesktop.Sdk\t25.08\norg.freedesktop.Sdk.Extension.rust-stable\t25.08\norg.freedesktop.Sdk\t25.08beta\n");
         // 26.08 n'a pas l'extension Rust : on reste sur 25.08.
-        assert_eq!(pick_branch(&st, Some("org.freedesktop.Sdk.Extension.rust-stable")), "25.08");
+        assert_eq!(pick_branch(&st, &["org.freedesktop.Sdk.Extension.rust-stable"]), "25.08");
         // Sans extension requise, la plus récente gagne.
-        assert_eq!(pick_branch(&st, None), "26.08");
+        assert_eq!(pick_branch(&st, &[]), "26.08");
     }
 
     #[test]

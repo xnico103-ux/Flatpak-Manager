@@ -2,7 +2,7 @@
 //! lancement, entrée de menu, icône).
 
 use crate::analyze::{ArchiveInfo, ExecKind, Severity, read_member};
-use crate::toolchains::BuildSystem;
+use crate::toolchains::{BuildSystem, Entry, extension_dir};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -165,6 +165,13 @@ pub struct SourceBuild {
     /// Nom du programme installé dans /app/bin.
     pub bin_name: String,
     pub bin_certain: bool,
+    /// Extension du SDK retenue (renseignée au lancement, selon ce qui est installé ou proposé).
+    pub extension: Option<String>,
+    pub entry: Entry,
+    pub alternatives: Vec<String>,
+    pub installable: bool,
+    pub requirements: bool,
+    pub build_script: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -244,9 +251,19 @@ impl BuildConfig {
         let name = info.guessed_name.clone();
         let hints = info.hints;
         let desktop = info.desktop.as_ref();
-        let source = info.source.as_ref().map(|p| SourceBuild { system: p.system, bin_name: p.bin_name.clone(), bin_certain: p.bin_certain });
-        // Les extensions Rust/Go ne sont fournies que pour le SDK Freedesktop.
-        let runtime = if source.as_ref().is_some_and(|s| s.system.extension().is_some()) {
+        let source = info.source.as_ref().map(|p| SourceBuild {
+            system: p.system,
+            bin_name: p.bin_name.clone(),
+            bin_certain: p.bin_certain,
+            extension: p.system.extension_candidates().first().map(|s| s.to_string()),
+            entry: p.entry.clone(),
+            alternatives: p.alternatives.clone(),
+            installable: p.installable,
+            requirements: p.requirements,
+            build_script: p.build_script,
+        });
+        // Les extensions (Rust, Go, Node.js, Java) ne sont fournies que pour le SDK Freedesktop.
+        let runtime = if source.as_ref().is_some_and(|s| s.system.needs_fdo()) {
             RuntimeKind::Freedesktop
         } else if hints.qt && !hints.electron {
             RuntimeKind::Kde
@@ -282,7 +299,7 @@ impl BuildConfig {
                 display: hints.gui,
                 gpu: hints.gui,
                 audio: hints.gui,
-                network: hints.network_likely,
+                network: hints.network_likely || info.source.as_ref().is_some_and(|p| p.network),
                 files: FileAccess::None,
                 removable_media: false,
                 all_devices: false,
@@ -326,6 +343,32 @@ impl BuildConfig {
         let flag = if self.electron { " --no-sandbox" } else { "" };
         s.push_str(&format!("exec {}{} \"$@\"\n", sh_quote(&format!("{base}/{}", self.exec_rel)), flag));
         s
+    }
+
+    /// Script de lancement des projets Python, Node.js et Java (None pour les autres).
+    pub fn launcher_script(&self) -> Option<String> {
+        let src = self.source.as_ref()?;
+        let slug = self.slug();
+        let base = format!("/app/opt/{slug}");
+        let mut s = String::from("#!/bin/sh\n");
+        match (&src.system, &src.entry) {
+            (BuildSystem::Python, entry) => {
+                s.push_str(&format!(
+                    "base={}\npp=\"\"\nfor d in \"$base\"/lib/python3*/site-packages \"$base\"/lib64/python3*/site-packages \"$base/src\"; do\n  [ -d \"$d\" ] && pp=\"$pp${{pp:+:}}$d\"\ndone\n[ -n \"$pp\" ] && export PYTHONPATH=\"$pp${{PYTHONPATH:+:$PYTHONPATH}}\"\n",
+                    sh_quote(&base)
+                ));
+                match entry {
+                    Entry::File(f) => s.push_str(&format!("exec python3 {} \"$@\"\n", sh_quote(&format!("{base}/src/{f}")))),
+                    Entry::Console(c) => s.push_str(&format!("exec python3 {} \"$@\"\n", sh_quote(&format!("{base}/bin/{c}")))),
+                    Entry::Module(m) => s.push_str(&format!("exec python3 -m {m} \"$@\"\n")),
+                    Entry::None => return None,
+                }
+            }
+            (BuildSystem::Node, Entry::File(f)) => s.push_str(&format!("exec /app/node/bin/node {} \"$@\"\n", sh_quote(&format!("{base}/{f}")))),
+            (BuildSystem::Java, Entry::File(f)) => s.push_str(&format!("exec /app/jre/bin/java -jar {} \"$@\"\n", sh_quote(&format!("{base}/{f}")))),
+            _ => return None,
+        }
+        Some(s)
     }
 
     pub fn desktop_file(&self) -> String {
@@ -401,20 +444,27 @@ impl BuildConfig {
         let run = format!("/run/build/{slug}");
         let mut m = serde_json::Map::new();
         m.insert("name".into(), json!(slug));
-        m.insert("sources".into(), json!([archive]));
+        let mut sources = vec![archive];
+        if self.launcher_script().is_some() {
+            sources.push(json!({ "type": "file", "path": "launcher.sh" }));
+        }
+        m.insert("sources".into(), json!(sources));
+        let ext_dir = src.extension.as_deref().map(extension_dir);
+        let ext_bin = ext_dir.as_ref().map(|d| format!("{d}/bin")).unwrap_or_default();
+        let opt = format!("/app/opt/{slug}");
         let mut opts = serde_json::Map::new();
         opts.insert("no-debuginfo".into(), json!(true));
         match src.system {
             BuildSystem::Cargo => {
                 m.insert("buildsystem".into(), json!("simple"));
-                opts.insert("append-path".into(), json!(src.system.extension_bin().unwrap_or_default()));
+                opts.insert("append-path".into(), json!(ext_bin));
                 opts.insert("env".into(), json!({ "CARGO_HOME": format!("{run}/cargo") }));
                 opts.insert("build-args".into(), json!(["--share=network"]));
                 m.insert("build-commands".into(), json!(["cargo build --release", format!("install -Dm755 target/release/{bin} /app/bin/{bin}")]));
             }
             BuildSystem::Go => {
                 m.insert("buildsystem".into(), json!("simple"));
-                opts.insert("append-path".into(), json!(src.system.extension_bin().unwrap_or_default()));
+                opts.insert("append-path".into(), json!(ext_bin));
                 opts.insert("env".into(), json!({ "GOCACHE": format!("{run}/go-cache"), "GOPATH": format!("{run}/go") }));
                 opts.insert("build-args".into(), json!(["--share=network"]));
                 // Le paquet principal est soit à la racine, soit dans cmd/<nom>.
@@ -433,6 +483,50 @@ impl BuildConfig {
             }
             BuildSystem::Autotools => {
                 m.insert("buildsystem".into(), json!("autotools"));
+            }
+            BuildSystem::Python => {
+                m.insert("buildsystem".into(), json!("simple"));
+                opts.insert("env".into(), json!({ "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PIP_BREAK_SYSTEM_PACKAGES": "1" }));
+                opts.insert("build-args".into(), json!(["--share=network"]));
+                let mut cmds: Vec<String> = Vec::new();
+                if src.installable {
+                    cmds.push(format!("pip3 install --prefix={opt} --no-cache-dir ."));
+                } else if src.requirements {
+                    cmds.push(format!("pip3 install --prefix={opt} --no-cache-dir -r requirements.txt"));
+                }
+                if matches!(src.entry, Entry::File(_)) {
+                    cmds.push(format!("mkdir -p {opt}/src && cp -a . {opt}/src/"));
+                }
+                cmds.push(format!("install -Dm755 launcher.sh /app/bin/{bin}"));
+                m.insert("build-commands".into(), json!(cmds));
+            }
+            BuildSystem::Node => {
+                m.insert("buildsystem".into(), json!("simple"));
+                let dir = ext_dir.clone().unwrap_or_default();
+                opts.insert("append-path".into(), json!(ext_bin));
+                opts.insert("env".into(), json!({ "npm_config_cache": format!("{run}/npm-cache"), "npm_config_nodedir": dir, "npm_config_update_notifier": "false" }));
+                opts.insert("build-args".into(), json!(["--share=network"]));
+                let mut cmds: Vec<String> = vec!["npm install --no-audit --no-fund".into()];
+                if src.build_script {
+                    cmds.push("npm run build".into());
+                    cmds.push("npm prune --omit=dev --no-audit --no-fund".into());
+                }
+                cmds.push(format!("mkdir -p {opt} && cp -a . {opt}/"));
+                cmds.push(format!("if [ -x {dir}/install.sh ]; then {dir}/install.sh; else install -Dm755 {dir}/bin/node /app/node/bin/node; fi"));
+                cmds.push("test -x /app/node/bin/node".into());
+                cmds.push(format!("install -Dm755 launcher.sh /app/bin/{bin}"));
+                m.insert("build-commands".into(), json!(cmds));
+            }
+            BuildSystem::Java => {
+                m.insert("buildsystem".into(), json!("simple"));
+                let dir = ext_dir.clone().unwrap_or_default();
+                let cmds = vec![
+                    format!("mkdir -p {opt} && cp -a . {opt}/"),
+                    format!("if [ -x {dir}/install.sh ]; then {dir}/install.sh; elif [ -x {dir}/installjdk.sh ]; then {dir}/installjdk.sh; else mkdir -p /app/jre && cp -a {dir}/jvm/openjdk-*/. /app/jre/; fi"),
+                    "test -x /app/jre/bin/java".into(),
+                    format!("install -Dm755 launcher.sh /app/bin/{bin}"),
+                ];
+                m.insert("build-commands".into(), json!(cmds));
             }
             BuildSystem::Make => {
                 m.insert("buildsystem".into(), json!("simple"));
@@ -462,7 +556,7 @@ impl BuildConfig {
             "finish-args": self.perms.finish_args(),
             "modules": [serde_json::Value::Object(m), meta]
         });
-        if let Some(e) = src.system.extension() {
+        if let Some(e) = &src.extension {
             root["sdk-extensions"] = json!([e]);
         }
         root
@@ -560,8 +654,10 @@ fn hsv(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
 pub fn prepare_workdir(cfg: &BuildConfig, info: &ArchiveInfo, work: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(work)?;
     let (icon_file, icon_dir) = prepare_icon(cfg, info, work)?;
-    if cfg.source.is_none() {
-        std::fs::write(work.join("wrapper.sh"), cfg.wrapper_script())?;
+    match cfg.launcher_script() {
+        Some(l) => std::fs::write(work.join("launcher.sh"), l)?,
+        None if cfg.source.is_none() => std::fs::write(work.join("wrapper.sh"), cfg.wrapper_script())?,
+        None => {}
     }
     std::fs::write(work.join(format!("{}.desktop", cfg.app_id)), cfg.desktop_file())?;
     let m = cfg.manifest(info, &icon_file, &icon_dir);
@@ -583,6 +679,9 @@ pub fn validate(cfg: &BuildConfig, info: &ArchiveInfo) -> Vec<String> {
         let b = &src.bin_name;
         if b.is_empty() || b.starts_with('-') || !b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-')) {
             v.push("Nom du programme invalide (lettres, chiffres, . _ + - seulement).".into());
+        }
+        if matches!(src.system, BuildSystem::Python | BuildSystem::Node | BuildSystem::Java) && src.entry == Entry::None {
+            v.push("Aucun point d'entrée à lancer n'a été trouvé.".into());
         }
         if !src.bin_certain {
             v.push("Confirmez le nom du programme à installer avant de compiler.".into());

@@ -564,6 +564,17 @@ fn verify_build(work: &Path, cfg: &BuildConfig, bundle: &Path, r: &Runner) -> Re
             Ok(m) if m.permissions().mode() & 0o111 != 0 => items.push((Severity::Info, format!("Programme compilé présent : /app/bin/{}", src.bin_name))),
             _ => items.push((Severity::Blocker, format!("Le programme « {} » n'a pas été installé dans /app/bin : la compilation a réussi mais ce nom est probablement incorrect. Corrigez le champ « Exécutable » en mode avancé.", src.bin_name))),
         }
+        let entry_path = match (&src.system, &src.entry) {
+            (crate::toolchains::BuildSystem::Python, crate::toolchains::Entry::File(f)) => Some(files.join("opt").join(&slug).join("src").join(f)),
+            (crate::toolchains::BuildSystem::Node | crate::toolchains::BuildSystem::Java, crate::toolchains::Entry::File(f)) => Some(files.join("opt").join(&slug).join(f)),
+            _ => None,
+        };
+        if let Some(e) = entry_path
+            && !e.exists()
+            && e.extension().is_none_or(|x| x != "js" && x != "mjs" && x != "cjs" || !e.with_extension("js").exists())
+        {
+            items.push((Severity::Blocker, format!("Le point d'entrée « {} » est introuvable dans le paquet : choisissez le bon fichier dans « Point d'entrée ».", e.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
+        }
     } else {
         let wrapper = files.join("bin").join(&slug);
         match std::fs::metadata(&wrapper) {
