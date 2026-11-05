@@ -460,7 +460,16 @@ impl BuildConfig {
                 opts.insert("append-path".into(), json!(ext_bin));
                 opts.insert("env".into(), json!({ "CARGO_HOME": format!("{run}/cargo") }));
                 opts.insert("build-args".into(), json!(["--share=network"]));
-                m.insert("build-commands".into(), json!(["cargo build --release", format!("install -Dm755 target/release/{bin} /app/bin/{bin}")]));
+                // Le nom du binaire peut être mal deviné (nom du paquet ≠ nom du programme, cible personnalisée dans
+                // .cargo/config.toml…) : si le fichier attendu manque, on prend l'unique exécutable produit.
+                let install = format!(
+                    "p=target/release/{bin}; if [ ! -f \"$p\" ]; then \
+                     set -- $(find target -maxdepth 3 -type f -perm -u+x -path '*/release/*' ! -path '*/deps/*' ! -path '*/build/*' ! -path '*/examples/*' ! -path '*/incremental/*' ! -name '*.so' ! -name '*.d' ! -name '*.rlib'); \
+                     if [ \"$#\" -eq 1 ]; then echo \"Binaire « {bin} » introuvable, utilisation de $1\"; p=\"$1\"; \
+                     else echo \"Binaire « {bin} » introuvable après la compilation. Fichiers produits :\"; find target -maxdepth 3 -type f -perm -u+x -path '*/release/*' ! -path '*/deps/*' ! -path '*/build/*'; exit 1; fi; fi; \
+                     install -Dm755 \"$p\" /app/bin/{bin}"
+                );
+                m.insert("build-commands".into(), json!(["cargo build --release", install]));
             }
             BuildSystem::Go => {
                 m.insert("buildsystem".into(), json!("simple"));
