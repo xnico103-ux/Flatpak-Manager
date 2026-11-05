@@ -765,6 +765,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
 
     // Analyse de l'exécutable principal
     let mut needed_libs: Vec<String> = Vec::new();
+    let mut dlopen_gui = false;
     let mut missing_libs: Vec<String> = Vec::new();
     if let Some(m) = main_exec.map(|i| executables[i].clone()) {
         push(&mut findings, Severity::Info, "Exécutable principal", format!("{} ({})", m.rel, kind.label()));
@@ -783,6 +784,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 if m.size <= MAX_ELF_PARSE {
                     match read_member(path, &m.raw, MAX_ELF_PARSE) {
                         Ok(data) => {
+                            // Bibliothèques graphiques chargées à l'exécution (dlopen), invisibles dans les dépendances ELF
+                            // (winit, SDL, GLFW… sous Wayland ou X11).
+                            dlopen_gui = [&b"libwayland-client.so"[..], b"libxkbcommon.so", b"libX11.so", b"libxcb.so", b"libvulkan.so", b"libEGL.so"]
+                                .iter()
+                                .any(|pat| data.windows(pat.len()).any(|w| w == *pat));
                             if let Ok(elf) = goblin::elf::Elf::parse(&data) {
                                 needed_libs = elf.libraries.iter().map(|s| s.to_string()).collect();
                             } else {
@@ -823,7 +829,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             missing_libs.push(lib.clone());
         }
     }
-    if lib_names.iter().any(|l| is_gui_lib(l)) || hints.electron || hints.qt || hints.gtk {
+    if dlopen_gui || lib_names.iter().any(|l| is_gui_lib(l)) || hints.electron || hints.qt || hints.gtk {
         hints.gui = true;
     }
     if hints.electron {
