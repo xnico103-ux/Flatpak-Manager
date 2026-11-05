@@ -19,7 +19,9 @@ pub fn sandbox_app_id() -> Option<String> {
     static ID: OnceLock<Option<String>> = OnceLock::new();
     ID.get_or_init(|| {
         let t = std::fs::read_to_string("/.flatpak-info").ok()?;
-        t.lines().find_map(|l| l.strip_prefix("name=")).map(|s| s.trim().to_string())
+        t.lines()
+            .find_map(|l| l.strip_prefix("name="))
+            .map(|s| s.trim().to_string())
     })
     .clone()
 }
@@ -27,7 +29,12 @@ pub fn sandbox_app_id() -> Option<String> {
 /// Exécute une commande en lui laissant au plus `secs` secondes (None si elle dépasse ou ne démarre pas).
 pub fn output_timeout(mut c: Command, secs: u64) -> Option<std::process::Output> {
     use std::io::Read;
-    let mut child = c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = c
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
     let mut stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -38,7 +45,9 @@ pub fn output_timeout(mut c: Command, secs: u64) -> Option<std::process::Output>
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break s,
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(40)),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(40))
+            }
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -46,7 +55,11 @@ pub fn output_timeout(mut c: Command, secs: u64) -> Option<std::process::Output>
             }
         }
     };
-    Some(std::process::Output { status, stdout: reader.join().unwrap_or_default(), stderr: Vec::new() })
+    Some(std::process::Output {
+        status,
+        stdout: reader.join().unwrap_or_default(),
+        stderr: Vec::new(),
+    })
 }
 
 /// Commande à lancer sur l'hôte.
@@ -58,7 +71,13 @@ fn cmd_inner(prog: &str) -> Command {
     if in_sandbox() {
         let mut c = Command::new("flatpak-spawn");
         // --watch-bus : la commande côté hôte est arrêtée si l'application se ferme ou annule.
-        c.args(["--host", "--watch-bus", "--env=LC_ALL=C", "--env=LANG=C", prog]);
+        c.args([
+            "--host",
+            "--watch-bus",
+            "--env=LC_ALL=C",
+            "--env=LANG=C",
+            prog,
+        ]);
         c
     } else {
         Command::new(prog)
@@ -77,7 +96,11 @@ pub fn sandbox_blocked() -> Option<String> {
             let mut probe = Command::new("flatpak-spawn");
             probe.args(["--host", "true"]);
             let ok = output_timeout(probe, 5).is_some_and(|o| o.status.success());
-            if ok { None } else { Some(sandbox_app_id().unwrap_or_else(|| "<identifiant de l'application>".into())) }
+            if ok {
+                None
+            } else {
+                Some(sandbox_app_id().unwrap_or_else(|| "<identifiant de l'application>".into()))
+            }
         })
         .clone()
 }

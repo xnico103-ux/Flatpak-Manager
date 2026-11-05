@@ -49,11 +49,9 @@ pub enum Level {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct VerifyReport {
     pub items: Vec<(Severity, String)>,
     pub sha256: String,
-    pub size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -91,9 +89,19 @@ pub struct Options {
 }
 
 pub enum Job {
-    Create { info: Box<ArchiveInfo>, cfg: Box<BuildConfig>, out: PathBuf },
-    Install { bundle: PathBuf },
-    CreateInstall { info: Box<ArchiveInfo>, cfg: Box<BuildConfig>, out: PathBuf },
+    Create {
+        info: Box<ArchiveInfo>,
+        cfg: Box<BuildConfig>,
+        out: PathBuf,
+    },
+    Install {
+        bundle: PathBuf,
+    },
+    CreateInstall {
+        info: Box<ArchiveInfo>,
+        cfg: Box<BuildConfig>,
+        out: PathBuf,
+    },
 }
 
 pub struct Handle {
@@ -124,16 +132,28 @@ pub fn spawn(job: Job, opts: Options, notify: Arc<dyn Fn() + Send + Sync>) -> Ha
                 let cancelled = runner.cancel.load(Ordering::SeqCst);
                 let tail = runner.tail.lock().unwrap().clone();
                 let mut diagnoses = diagnose(&tail);
-                let msg = if cancelled { "Opération annulée.".to_string() } else { format!("{e:#}") };
+                let msg = if cancelled {
+                    "Opération annulée.".to_string()
+                } else {
+                    format!("{e:#}")
+                };
                 if !cancelled {
                     diagnoses.extend(diagnose(std::slice::from_ref(&msg)));
                 }
-                Err(Failure { message: msg, diagnoses, cancelled })
+                Err(Failure {
+                    message: msg,
+                    diagnoses,
+                    cancelled,
+                })
             }
         };
         runner.emit(Event::Finished(ev));
     });
-    Handle { rx, cancel, confirm_tx }
+    Handle {
+        rx,
+        cancel,
+        confirm_tx,
+    }
 }
 
 struct Runner {
@@ -161,7 +181,11 @@ impl Runner {
         self.emit(Event::Log(l, s.into()));
     }
     fn check_cancel(&self) -> Result<()> {
-        if self.cancel.load(Ordering::SeqCst) { bail!("Opération annulée.") } else { Ok(()) }
+        if self.cancel.load(Ordering::SeqCst) {
+            bail!("Opération annulée.")
+        } else {
+            Ok(())
+        }
     }
     fn set_plan(&self, p: Vec<Phase>) {
         *self.plan.lock().unwrap() = p.clone();
@@ -191,14 +215,27 @@ impl Runner {
         let shown = format!(
             "$ {} {}",
             cmd.get_program().to_string_lossy(),
-            cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
+            cmd.get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
         );
         self.log(Level::Cmd, shown);
         if let Some(c) = cwd {
             cmd.current_dir(c);
         }
-        cmd.env("LC_ALL", "C").env("LANG", "C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
-        let mut child = cmd.spawn().map_err(|e| anyhow!("impossible de lancer {} : {e}", cmd.get_program().to_string_lossy()))?;
+        cmd.env("LC_ALL", "C")
+            .env("LANG", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        let mut child = cmd.spawn().map_err(|e| {
+            anyhow!(
+                "impossible de lancer {} : {e}",
+                cmd.get_program().to_string_lossy()
+            )
+        })?;
         let (ltx, lrx) = channel::<String>();
         let mut readers = Vec::new();
         if let Some(o) = child.stdout.take() {
@@ -216,7 +253,9 @@ impl Runner {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
             if self.cancel.load(Ordering::SeqCst) {
-                let _ = Command::new("kill").args(["-TERM", "--", &format!("-{pid}")]).status();
+                let _ = Command::new("kill")
+                    .args(["-TERM", "--", &format!("-{pid}")])
+                    .status();
                 let _ = child.kill();
                 break;
             }
@@ -250,11 +289,21 @@ impl Runner {
             return;
         }
         // Détection de phases dans la sortie de flatpak-builder.
-        if low.starts_with("downloading") || low.starts_with("installing org.") || low.starts_with("installing runtime") {
+        if low.starts_with("downloading")
+            || low.starts_with("installing org.")
+            || low.starts_with("installing runtime")
+        {
             self.set_phase(Phase::Runtime);
-        } else if low.starts_with("building module") || low.starts_with("starting build") || low.starts_with("running:") {
+        } else if low.starts_with("building module")
+            || low.starts_with("starting build")
+            || low.starts_with("running:")
+        {
             self.set_phase(Phase::Build);
-        } else if low.starts_with("committing") || low.starts_with("exporting") || low.starts_with("pruning") || low.starts_with("cleaning up") {
+        } else if low.starts_with("committing")
+            || low.starts_with("exporting")
+            || low.starts_with("pruning")
+            || low.starts_with("cleaning up")
+        {
             self.set_phase(Phase::Export);
         }
         let level = if low.starts_with("error") || low.contains("error:") {
@@ -269,22 +318,52 @@ impl Runner {
     }
 
     fn simple(&self, prog: &str, args: &[&str]) -> bool {
-        crate::host::cmd(prog).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+        crate::host::cmd(prog)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 
     fn scope_flag(&self) -> &'static str {
-        if self.opts.system_install { "--system" } else { "--user" }
+        if self.opts.system_install {
+            "--system"
+        } else {
+            "--user"
+        }
     }
 
     fn run(&self, job: Job) -> Result<Outcome> {
         match job {
             Job::Create { info, cfg, out } => {
-                self.set_plan(vec![Phase::Prepare, Phase::Runtime, Phase::Build, Phase::Export, Phase::Verify]);
+                self.set_plan(vec![
+                    Phase::Prepare,
+                    Phase::Runtime,
+                    Phase::Build,
+                    Phase::Export,
+                    Phase::Verify,
+                ]);
                 let (bundle, _) = self.create(&info, &cfg, &out)?;
-                Ok(Outcome { bundle: Some(bundle), installed: false, app_id: cfg.app_id.clone(), name: cfg.name.clone(), version: cfg.version.clone() })
+                Ok(Outcome {
+                    bundle: Some(bundle),
+                    installed: false,
+                    app_id: cfg.app_id.clone(),
+                    name: cfg.name.clone(),
+                    version: cfg.version.clone(),
+                })
             }
             Job::CreateInstall { info, cfg, out } => {
-                self.set_plan(vec![Phase::Prepare, Phase::Runtime, Phase::Build, Phase::Export, Phase::Verify, Phase::Install]);
+                self.set_plan(vec![
+                    Phase::Prepare,
+                    Phase::Runtime,
+                    Phase::Build,
+                    Phase::Export,
+                    Phase::Verify,
+                    Phase::Install,
+                ]);
                 let (bundle, report) = self.create(&info, &cfg, &out)?;
                 let mut go = true;
                 if self.opts.confirm_before_install {
@@ -293,11 +372,26 @@ impl Runner {
                     self.check_cancel()?;
                 }
                 if !go {
-                    self.log(Level::Info, "Installation non confirmée : le paquet a été créé mais pas installé.");
-                    return Ok(Outcome { bundle: Some(bundle), installed: false, app_id: cfg.app_id.clone(), name: cfg.name.clone(), version: cfg.version.clone() });
+                    self.log(
+                        Level::Info,
+                        "Installation non confirmée : le paquet a été créé mais pas installé.",
+                    );
+                    return Ok(Outcome {
+                        bundle: Some(bundle),
+                        installed: false,
+                        app_id: cfg.app_id.clone(),
+                        name: cfg.name.clone(),
+                        version: cfg.version.clone(),
+                    });
                 }
                 self.install_bundle(&bundle, Some(&cfg.app_id))?;
-                Ok(Outcome { bundle: Some(bundle), installed: true, app_id: cfg.app_id.clone(), name: cfg.name.clone(), version: cfg.version.clone() })
+                Ok(Outcome {
+                    bundle: Some(bundle),
+                    installed: true,
+                    app_id: cfg.app_id.clone(),
+                    name: cfg.name.clone(),
+                    version: cfg.version.clone(),
+                })
             }
             Job::Install { bundle } => {
                 self.set_plan(vec![Phase::Verify, Phase::Install]);
@@ -309,15 +403,26 @@ impl Runner {
                     bail!("Le fichier n'est pas un paquet Flatpak valide.");
                 }
                 self.install_bundle(&bundle, None)?;
-                let name = bundle.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                Ok(Outcome { bundle: Some(bundle), installed: true, app_id: String::new(), name, version: String::new() })
+                let name = bundle
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                Ok(Outcome {
+                    bundle: Some(bundle),
+                    installed: true,
+                    app_id: String::new(),
+                    name,
+                    version: String::new(),
+                })
             }
         }
     }
 
     fn require_flatpak(&self) -> Result<()> {
         if !self.simple("flatpak", &["--version"]) {
-            bail!("Flatpak n'est pas installé sur ce système. Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis relancez l'opération.");
+            bail!(
+                "Flatpak n'est pas installé sur ce système. Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis relancez l'opération."
+            );
         }
         Ok(())
     }
@@ -331,7 +436,14 @@ impl Runner {
         }
         self.log(Level::Warn, "flatpak-builder est absent : installation de org.flatpak.Builder depuis Flathub (pour l'utilisateur courant).");
         let mut c = crate::host::cmd("flatpak");
-        c.args(["install", "--user", "-y", "--noninteractive", "flathub", "org.flatpak.Builder"]);
+        c.args([
+            "install",
+            "--user",
+            "-y",
+            "--noninteractive",
+            "flathub",
+            "org.flatpak.Builder",
+        ]);
         let code = self.run_cmd(c, None)?;
         if code != 0 {
             bail!("Impossible d'installer Flatpak Builder (code {code}).");
@@ -340,11 +452,19 @@ impl Runner {
     }
 
     fn resolve_runtime_version(&self, cfg: &BuildConfig) -> String {
-        if cfg.runtime == RuntimeKind::Freedesktop || cfg.runtime_version != cfg.runtime.fallback_version() {
+        if cfg.runtime == RuntimeKind::Freedesktop
+            || cfg.runtime_version != cfg.runtime.fallback_version()
+        {
             return cfg.runtime_version.clone();
         }
         let out = crate::host::cmd("flatpak")
-            .args(["remote-ls", "--user", "--runtime", "--columns=application,branch", "flathub"])
+            .args([
+                "remote-ls",
+                "--user",
+                "--runtime",
+                "--columns=application,branch",
+                "flathub",
+            ])
             .env("LC_ALL", "C")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -359,25 +479,43 @@ impl Runner {
                 if let Some(b) = it.next() {
                     let key: Option<Vec<u32>> = b.split('.').map(|x| x.parse().ok()).collect();
                     if let Some(k) = key
-                        && best.as_ref().is_none_or(|(bk, _)| k > *bk) {
-                            best = Some((k, b.to_string()));
-                        }
+                        && best.as_ref().is_none_or(|(bk, _)| k > *bk)
+                    {
+                        best = Some((k, b.to_string()));
+                    }
                 }
             }
         }
         match best {
             Some((_, v)) => {
-                self.log(Level::Info, format!("Version de runtime résolue : {} {v}", cfg.runtime.platform()));
+                self.log(
+                    Level::Info,
+                    format!(
+                        "Version de runtime résolue : {} {v}",
+                        cfg.runtime.platform()
+                    ),
+                );
                 v
             }
             None => {
-                self.log(Level::Warn, format!("Version de runtime non résolue, valeur par défaut : {}", cfg.runtime_version));
+                self.log(
+                    Level::Warn,
+                    format!(
+                        "Version de runtime non résolue, valeur par défaut : {}",
+                        cfg.runtime_version
+                    ),
+                );
                 cfg.runtime_version.clone()
             }
         }
     }
 
-    fn create(&self, info: &ArchiveInfo, cfg: &BuildConfig, out: &Path) -> Result<(PathBuf, VerifyReport)> {
+    fn create(
+        &self,
+        info: &ArchiveInfo,
+        cfg: &BuildConfig,
+        out: &Path,
+    ) -> Result<(PathBuf, VerifyReport)> {
         self.set_phase(Phase::Prepare);
         self.require_flatpak()?;
         if !info.is_compatible() {
@@ -387,25 +525,50 @@ impl Runner {
         let builder = self.find_builder()?;
         self.log(Level::Info, "Ajout du dépôt Flathub si nécessaire…");
         let mut c = crate::host::cmd("flatpak");
-        c.args(["remote-add", "--user", "--if-not-exists", "flathub", FLATHUB_URL]);
+        c.args([
+            "remote-add",
+            "--user",
+            "--if-not-exists",
+            "flathub",
+            FLATHUB_URL,
+        ]);
         let _ = self.run_cmd(c, None)?;
         cfg.runtime_version = self.resolve_runtime_version(&cfg);
 
-        let cache = dirs::cache_dir().ok_or_else(|| anyhow!("dossier de cache introuvable"))?.join("flatpak-manager").join("build");
+        let cache = dirs::cache_dir()
+            .ok_or_else(|| anyhow!("dossier de cache introuvable"))?
+            .join("flatpak-manager")
+            .join("build");
         let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let work = cache.join(format!("{}-{ts}", cfg.slug()));
-        self.log(Level::Info, format!("Dossier de travail : {}", work.display()));
+        self.log(
+            Level::Info,
+            format!("Dossier de travail : {}", work.display()),
+        );
         let result = self.create_in(&builder, info, &cfg, &work, out);
         // Nettoyage du dossier de travail (nous l'avons créé nous-mêmes).
         if let Err(e) = std::fs::remove_dir_all(&work) {
-            self.log(Level::Warn, format!("Nettoyage incomplet de {} : {e}", work.display()));
+            self.log(
+                Level::Warn,
+                format!("Nettoyage incomplet de {} : {e}", work.display()),
+            );
         }
         result
     }
 
-    fn create_in(&self, builder: &Builder, info: &ArchiveInfo, cfg: &BuildConfig, work: &Path, out: &Path) -> Result<(PathBuf, VerifyReport)> {
+    fn create_in(
+        &self,
+        builder: &Builder,
+        info: &ArchiveInfo,
+        cfg: &BuildConfig,
+        work: &Path,
+        out: &Path,
+    ) -> Result<(PathBuf, VerifyReport)> {
         let manifest = prepare_workdir(cfg, info, work)?;
-        self.log(Level::Info, format!("Manifeste généré : {}", manifest.display()));
+        self.log(
+            Level::Info,
+            format!("Manifeste généré : {}", manifest.display()),
+        );
         self.check_cancel()?;
         self.set_phase(Phase::Runtime);
 
@@ -425,14 +588,19 @@ impl Runner {
             };
             c.args(["--user", "--force-clean", "--install-deps-from=flathub"]);
             c.args(extra);
-            c.arg("--repo=repo").arg("builddir").arg(manifest.file_name().unwrap());
+            c.arg("--repo=repo")
+                .arg("builddir")
+                .arg(manifest.file_name().unwrap());
             self.run_cmd(c, Some(work))
         };
         let mut code = build(&[])?;
         if code != 0 {
             let t = self.tail.lock().unwrap().join("\n").to_lowercase();
             if t.contains("rofiles-fuse") || t.contains("fuse") {
-                self.log(Level::Warn, "FUSE indisponible : nouvelle tentative sans rofiles-fuse.");
+                self.log(
+                    Level::Warn,
+                    "FUSE indisponible : nouvelle tentative sans rofiles-fuse.",
+                );
                 code = build(&["--disable-rofiles-fuse"])?;
             }
         }
@@ -443,7 +611,11 @@ impl Runner {
         self.set_phase(Phase::Export);
         let tmp_bundle = work.join("out.flatpak");
         let mut c = crate::host::cmd("flatpak");
-        c.arg("build-bundle").arg(format!("--runtime-repo={FLATHUB_URL}")).arg("repo").arg(&tmp_bundle).arg(&cfg.app_id);
+        c.arg("build-bundle")
+            .arg(format!("--runtime-repo={FLATHUB_URL}"))
+            .arg("repo")
+            .arg(&tmp_bundle)
+            .arg(&cfg.app_id);
         let code = self.run_cmd(c, Some(work))?;
         if code != 0 {
             bail!("La création du fichier .flatpak a échoué (code {code}).");
@@ -458,8 +630,12 @@ impl Runner {
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::copy(&tmp_bundle, out).map_err(|e| anyhow!("écriture de {} impossible : {e}", out.display()))?;
-        self.log(Level::Info, format!("Paquet enregistré : {}", out.display()));
+        std::fs::copy(&tmp_bundle, out)
+            .map_err(|e| anyhow!("écriture de {} impossible : {e}", out.display()))?;
+        self.log(
+            Level::Info,
+            format!("Paquet enregistré : {}", out.display()),
+        );
         Ok((out.to_path_buf(), report))
     }
 
@@ -467,16 +643,25 @@ impl Runner {
         self.set_phase(Phase::Install);
         let args = |reinstall: bool| {
             let mut c = crate::host::cmd("flatpak");
-            c.args(["install", self.scope_flag(), "--bundle", "-y", "--noninteractive"]);
+            c.args([
+                "install",
+                self.scope_flag(),
+                "--bundle",
+                "-y",
+                "--noninteractive",
+            ]);
             if reinstall {
                 c.arg("--reinstall");
             }
             c.arg(bundle);
             c
         };
-        let already = app_id.is_some_and(|id| self.simple("flatpak", &["info", self.scope_flag(), id]));
+        let already =
+            app_id.is_some_and(|id| self.simple("flatpak", &["info", self.scope_flag(), id]));
         if already && !self.opts.replace_existing {
-            bail!("L'application est déjà installée (already installed). Activez le remplacement dans les paramètres avancés pour la mettre à jour.");
+            bail!(
+                "L'application est déjà installée (already installed). Activez le remplacement dans les paramètres avancés pour la mettre à jour."
+            );
         }
         if already {
             self.log(Level::Warn, "Application déjà installée : elle sera réinstallée (vos données dans ~/.var/app sont conservées).");
@@ -485,7 +670,10 @@ impl Runner {
         if code != 0 && self.opts.replace_existing && !already {
             let t = self.tail.lock().unwrap().join("\n").to_lowercase();
             if t.contains("already installed") {
-                self.log(Level::Warn, "Déjà installée : nouvelle tentative en réinstallation (données conservées).");
+                self.log(
+                    Level::Warn,
+                    "Déjà installée : nouvelle tentative en réinstallation (données conservées).",
+                );
                 code = self.run_cmd(args(true), None)?;
             }
         }
@@ -494,16 +682,24 @@ impl Runner {
         }
         if let Some(id) = app_id {
             if !self.simple("flatpak", &["info", self.scope_flag(), id]) {
-                bail!("L'installation semble avoir réussi mais l'application est introuvable (flatpak info).");
+                bail!(
+                    "L'installation semble avoir réussi mais l'application est introuvable (flatpak info)."
+                );
             }
-            self.log(Level::Info, format!("Application installée et vérifiée : {id}"));
+            self.log(
+                Level::Info,
+                format!("Application installée et vérifiée : {id}"),
+            );
         }
         self.frac(1.0);
         Ok(())
     }
 }
 
-pub(crate) fn pump<R: Read + Send + 'static>(mut r: R, tx: Sender<String>) -> std::thread::JoinHandle<()> {
+pub(crate) fn pump<R: Read + Send + 'static>(
+    mut r: R,
+    tx: Sender<String>,
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         let mut cur: Vec<u8> = Vec::new();
@@ -533,23 +729,39 @@ pub(crate) fn pump<R: Read + Send + 'static>(mut r: R, tx: Sender<String>) -> st
 /// Extrait un pourcentage d'une ligne de progression de flatpak (« Installing… 42% »).
 pub fn parse_percent(line: &str) -> Option<f32> {
     let l = line.to_lowercase();
-    if !(l.contains("installing") || l.contains("updating") || l.contains("downloading") || l.contains("fetching") || l.contains("pulling")) {
+    if !(l.contains("installing")
+        || l.contains("updating")
+        || l.contains("downloading")
+        || l.contains("fetching")
+        || l.contains("pulling"))
+    {
         return None;
     }
     let idx = line.find('%')?;
-    let digits: String = line[..idx].chars().rev().take_while(|c| c.is_ascii_digit()).collect::<Vec<_>>().into_iter().rev().collect();
+    let digits: String = line[..idx]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     digits.parse::<f32>().ok().map(|p| p / 100.0)
 }
 
 fn on_path(prog: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()))
+    std::env::var_os("PATH")
+        .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()))
 }
 
 /// Vrai si le fichier commence par l'en-tête ELF ou par « #! ».
 fn is_elf_or_script(p: &Path) -> bool {
     use std::io::Read;
     let mut h = [0u8; 4];
-    std::fs::File::open(p).and_then(|mut f| f.read_exact(&mut h)).is_ok() && (h == [0x7f, b'E', b'L', b'F'] || h[..2] == *b"#!")
+    std::fs::File::open(p)
+        .and_then(|mut f| f.read_exact(&mut h))
+        .is_ok()
+        && (h == [0x7f, b'E', b'L', b'F'] || h[..2] == *b"#!")
 }
 
 fn verify_build(work: &Path, cfg: &BuildConfig, bundle: &Path, r: &Runner) -> Result<VerifyReport> {
@@ -565,57 +777,105 @@ fn verify_build(work: &Path, cfg: &BuildConfig, bundle: &Path, r: &Runner) -> Re
             _ => items.push((Severity::Blocker, format!("Le programme « {} » n'a pas été installé dans /app/bin : la compilation a réussi mais ce nom est probablement incorrect. Corrigez le champ « Exécutable » en mode avancé.", src.bin_name))),
         }
         let entry_path = match (&src.system, &src.entry) {
-            (crate::toolchains::BuildSystem::Python, crate::toolchains::Entry::File(f)) => Some(files.join("opt").join(&slug).join("src").join(f)),
-            (crate::toolchains::BuildSystem::Node | crate::toolchains::BuildSystem::Java, crate::toolchains::Entry::File(f)) => Some(files.join("opt").join(&slug).join(f)),
+            (crate::toolchains::BuildSystem::Python, crate::toolchains::Entry::File(f)) => {
+                Some(files.join("opt").join(&slug).join("src").join(f))
+            }
+            (
+                crate::toolchains::BuildSystem::Node | crate::toolchains::BuildSystem::Java,
+                crate::toolchains::Entry::File(f),
+            ) => Some(files.join("opt").join(&slug).join(f)),
             _ => None,
         };
         if let Some(e) = entry_path
             && !e.exists()
-            && e.extension().is_none_or(|x| x != "js" && x != "mjs" && x != "cjs" || !e.with_extension("js").exists())
+            && e.extension().is_none_or(|x| {
+                x != "js" && x != "mjs" && x != "cjs" || !e.with_extension("js").exists()
+            })
         {
             items.push((Severity::Blocker, format!("Le point d'entrée « {} » est introuvable dans le paquet : choisissez le bon fichier dans « Point d'entrée ».", e.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
         }
     } else {
         let wrapper = files.join("bin").join(&slug);
         match std::fs::metadata(&wrapper) {
-            Ok(m) if m.permissions().mode() & 0o111 != 0 => items.push((Severity::Info, format!("Script de lancement présent : /app/bin/{slug}"))),
-            _ => items.push((Severity::Blocker, format!("Script de lancement manquant ou non exécutable : /app/bin/{slug}"))),
+            Ok(m) if m.permissions().mode() & 0o111 != 0 => items.push((
+                Severity::Info,
+                format!("Script de lancement présent : /app/bin/{slug}"),
+            )),
+            _ => items.push((
+                Severity::Blocker,
+                format!("Script de lancement manquant ou non exécutable : /app/bin/{slug}"),
+            )),
         }
         let exec = files.join("opt").join(&slug).join(&cfg.exec_rel);
         if exec.is_file() {
-            items.push((Severity::Info, format!("Exécutable présent : {}", cfg.exec_rel)));
+            items.push((
+                Severity::Info,
+                format!("Exécutable présent : {}", cfg.exec_rel),
+            ));
         } else {
-            items.push((Severity::Blocker, format!("Exécutable introuvable dans le paquet : {}", cfg.exec_rel)));
+            items.push((
+                Severity::Blocker,
+                format!("Exécutable introuvable dans le paquet : {}", cfg.exec_rel),
+            ));
         }
     }
-    let desktop = work.join("builddir/export/share/applications").join(format!("{}.desktop", cfg.app_id));
+    let desktop = work
+        .join("builddir/export/share/applications")
+        .join(format!("{}.desktop", cfg.app_id));
     if desktop.is_file() {
         items.push((Severity::Info, "Entrée de menu exportée".into()));
         if on_path("desktop-file-validate") {
             let ok = r.simple("desktop-file-validate", &[&desktop.to_string_lossy()]);
-            items.push((if ok { Severity::Info } else { Severity::Warning }, if ok { "Entrée de menu valide (desktop-file-validate)".into() } else { "desktop-file-validate signale des avertissements".into() }));
+            items.push((
+                if ok {
+                    Severity::Info
+                } else {
+                    Severity::Warning
+                },
+                if ok {
+                    "Entrée de menu valide (desktop-file-validate)".into()
+                } else {
+                    "desktop-file-validate signale des avertissements".into()
+                },
+            ));
         }
     } else {
         items.push((Severity::Blocker, "Entrée de menu non exportée".into()));
     }
     let icons = work.join("builddir/export/share/icons");
     let has_icon = walk_has_prefix(&icons, &cfg.app_id, 5);
-    items.push((if has_icon { Severity::Info } else { Severity::Warning }, if has_icon { "Icône exportée".into() } else { "Icône non exportée".into() }));
+    items.push((
+        if has_icon {
+            Severity::Info
+        } else {
+            Severity::Warning
+        },
+        if has_icon {
+            "Icône exportée".into()
+        } else {
+            "Icône non exportée".into()
+        },
+    ));
     let size = std::fs::metadata(bundle).map(|m| m.len()).unwrap_or(0);
     if size == 0 {
         items.push((Severity::Blocker, "Le fichier .flatpak est vide".into()));
     } else {
-        items.push((Severity::Info, format!("Fichier .flatpak créé ({} Mio)", (size >> 20).max(1))));
+        items.push((
+            Severity::Info,
+            format!("Fichier .flatpak créé ({} Mio)", (size >> 20).max(1)),
+        ));
     }
     let sha256 = sha256_file(bundle).unwrap_or_default();
-    Ok(VerifyReport { items, sha256, size })
+    Ok(VerifyReport { items, sha256 })
 }
 
 fn walk_has_prefix(dir: &Path, prefix: &str, depth: u32) -> bool {
     if depth == 0 {
         return false;
     }
-    let Ok(rd) = std::fs::read_dir(dir) else { return false };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -631,21 +891,52 @@ fn walk_has_prefix(dir: &Path, prefix: &str, depth: u32) -> bool {
 
 pub fn verify_bundle_only(bundle: &Path) -> Result<VerifyReport> {
     let mut items = Vec::new();
-    let meta = std::fs::metadata(bundle).map_err(|e| anyhow!("lecture de {} : {e}", bundle.display()))?;
-    let is_ext = bundle.extension().is_some_and(|e| e.eq_ignore_ascii_case("flatpak"));
-    items.push((if is_ext { Severity::Info } else { Severity::Warning }, if is_ext { "Extension .flatpak".into() } else { "L'extension n'est pas .flatpak".into() }));
+    let meta =
+        std::fs::metadata(bundle).map_err(|e| anyhow!("lecture de {} : {e}", bundle.display()))?;
+    let is_ext = bundle
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("flatpak"));
+    items.push((
+        if is_ext {
+            Severity::Info
+        } else {
+            Severity::Warning
+        },
+        if is_ext {
+            "Extension .flatpak".into()
+        } else {
+            "L'extension n'est pas .flatpak".into()
+        },
+    ));
     if meta.len() == 0 {
         items.push((Severity::Blocker, "Le fichier est vide".into()));
     } else {
-        items.push((Severity::Info, format!("Taille : {} Mio", (meta.len() >> 20).max(1))));
+        items.push((
+            Severity::Info,
+            format!("Taille : {} Mio", (meta.len() >> 20).max(1)),
+        ));
     }
     // Un bundle OSTree commence par l'en-tête GVariant ; on vérifie la présence de la chaîne « flatpak » au début.
     let mut head = vec![0u8; 4096];
     let n = std::fs::File::open(bundle)?.read(&mut head)?;
     head.truncate(n);
     let looks = head.windows(7).any(|w| w == b"flatpak") || head.windows(5).any(|w| w == b"ostree");
-    items.push((if looks { Severity::Info } else { Severity::Warning }, if looks { "En-tête de paquet Flatpak reconnu".into() } else { "En-tête non reconnu : Flatpak validera le fichier à l'installation".into() }));
-    Ok(VerifyReport { items, sha256: sha256_file(bundle)?, size: meta.len() })
+    items.push((
+        if looks {
+            Severity::Info
+        } else {
+            Severity::Warning
+        },
+        if looks {
+            "En-tête de paquet Flatpak reconnu".into()
+        } else {
+            "En-tête non reconnu : Flatpak validera le fichier à l'installation".into()
+        },
+    ));
+    Ok(VerifyReport {
+        items,
+        sha256: sha256_file(bundle)?,
+    })
 }
 
 #[cfg(test)]

@@ -52,8 +52,16 @@ impl BuildSystem {
         match self {
             BuildSystem::Cargo => &["org.freedesktop.Sdk.Extension.rust-stable"],
             BuildSystem::Go => &["org.freedesktop.Sdk.Extension.golang"],
-            BuildSystem::Node => &["org.freedesktop.Sdk.Extension.node24", "org.freedesktop.Sdk.Extension.node22", "org.freedesktop.Sdk.Extension.node20"],
-            BuildSystem::Java => &["org.freedesktop.Sdk.Extension.openjdk25", "org.freedesktop.Sdk.Extension.openjdk21", "org.freedesktop.Sdk.Extension.openjdk"],
+            BuildSystem::Node => &[
+                "org.freedesktop.Sdk.Extension.node24",
+                "org.freedesktop.Sdk.Extension.node22",
+                "org.freedesktop.Sdk.Extension.node20",
+            ],
+            BuildSystem::Java => &[
+                "org.freedesktop.Sdk.Extension.openjdk25",
+                "org.freedesktop.Sdk.Extension.openjdk21",
+                "org.freedesktop.Sdk.Extension.openjdk",
+            ],
             _ => &[],
         }
     }
@@ -81,10 +89,18 @@ impl BuildSystem {
     /// Phrase d'introduction affichée dans l'analyse.
     pub fn intro(&self) -> &'static str {
         match self {
-            BuildSystem::Python => "Les dépendances Python seront installées dans le bac à sable Flatpak (pip) puis le programme sera empaqueté avec l'interpréteur du runtime.",
-            BuildSystem::Node => "Les dépendances seront installées (npm) dans le bac à sable Flatpak, puis le programme sera empaqueté avec Node.js fourni par l'extension du SDK.",
-            BuildSystem::Java => "Ce programme Java est déjà construit : il sera empaqueté tel quel avec un environnement Java (JRE) fourni par l'extension OpenJDK.",
-            _ => "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes.",
+            BuildSystem::Python => {
+                "Les dépendances Python seront installées dans le bac à sable Flatpak (pip) puis le programme sera empaqueté avec l'interpréteur du runtime."
+            }
+            BuildSystem::Node => {
+                "Les dépendances seront installées (npm) dans le bac à sable Flatpak, puis le programme sera empaqueté avec Node.js fourni par l'extension du SDK."
+            }
+            BuildSystem::Java => {
+                "Ce programme Java est déjà construit : il sera empaqueté tel quel avec un environnement Java (JRE) fourni par l'extension OpenJDK."
+            }
+            _ => {
+                "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes."
+            }
         }
     }
 
@@ -92,7 +108,11 @@ impl BuildSystem {
     fn host_tools(&self) -> &'static [(&'static str, &'static [&'static str])] {
         match self {
             BuildSystem::Cargo => &[("rustc", &["--version"]), ("cargo", &["--version"])],
-            BuildSystem::CMake => &[("gcc", &["--version"]), ("g++", &["--version"]), ("cmake", &["--version"])],
+            BuildSystem::CMake => &[
+                ("gcc", &["--version"]),
+                ("g++", &["--version"]),
+                ("cmake", &["--version"]),
+            ],
             BuildSystem::Meson => &[("gcc", &["--version"]), ("meson", &["--version"])],
             BuildSystem::Autotools => &[("gcc", &["--version"]), ("make", &["--version"])],
             BuildSystem::Make => &[("gcc", &["--version"]), ("make", &["--version"])],
@@ -204,7 +224,11 @@ pub enum Detection {
 }
 
 fn valid_bin(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 80 && !s.starts_with('-') && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
+    !s.is_empty()
+        && s.len() <= 80
+        && !s.starts_with('-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
 }
 
 /// Premier argument d'un appel `nom(...)`, sans guillemets ni crochets.
@@ -215,11 +239,17 @@ fn call_arg(text: &str, call: &str) -> Option<String> {
     while let Some(i) = low[from..].find(&needle) {
         let start = from + i;
         // Le nom doit commencer un mot (pas `my_project(`).
-        let boundary = start == 0 || !low.as_bytes()[start - 1].is_ascii_alphanumeric() && low.as_bytes()[start - 1] != b'_';
+        let boundary = start == 0
+            || !low.as_bytes()[start - 1].is_ascii_alphanumeric()
+                && low.as_bytes()[start - 1] != b'_';
         if boundary {
             let rest = &text[start + needle.len()..];
-            let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '['));
-            let arg: String = rest.chars().take_while(|c| !c.is_whitespace() && !matches!(c, ',' | '\'' | '"' | ')' | ']')).collect();
+            let rest = rest
+                .trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '['));
+            let arg: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !matches!(c, ',' | '\'' | '"' | ')' | ']'))
+                .collect();
             if !arg.is_empty() {
                 return Some(arg);
             }
@@ -241,7 +271,12 @@ fn pick(name: Option<String>, fallback: &str) -> (String, bool) {
     }
 }
 
-fn project(system: BuildSystem, bin: (String, bool), content: &str, gui_words: &[&str]) -> SourceProject {
+fn project(
+    system: BuildSystem,
+    bin: (String, bool),
+    content: &str,
+    gui_words: &[&str],
+) -> SourceProject {
     SourceProject {
         system,
         bin_name: bin.0,
@@ -249,8 +284,27 @@ fn project(system: BuildSystem, bin: (String, bool), content: &str, gui_words: &
         gui: any_of(content, gui_words),
         devices: false,
         network: false,
-        qt: any_of(content, &["qt5", "qt6", "find_package(qt", "dependency('qt", "dependency(\"qt"]),
-        gtk: any_of(content, &["gtk+-3", "gtk4", "gtk3", "find_package(gtk", "dependency('gtk", "dependency(\"gtk"]),
+        qt: any_of(
+            content,
+            &[
+                "qt5",
+                "qt6",
+                "find_package(qt",
+                "dependency('qt",
+                "dependency(\"qt",
+            ],
+        ),
+        gtk: any_of(
+            content,
+            &[
+                "gtk+-3",
+                "gtk4",
+                "gtk3",
+                "find_package(gtk",
+                "dependency('gtk",
+                "dependency(\"gtk",
+            ],
+        ),
         notes: vec![],
         blocker: None,
         entry: Entry::None,
@@ -261,24 +315,53 @@ fn project(system: BuildSystem, bin: (String, bool), content: &str, gui_words: &
     }
 }
 
-const GUI_NATIVE: [&str; 9] = ["qt5", "qt6", "gtk", "sdl2", "sdl3", "sfml", "glfw", "wxwidgets", "raylib"];
+const GUI_NATIVE: [&str; 9] = [
+    "qt5",
+    "qt6",
+    "gtk",
+    "sdl2",
+    "sdl3",
+    "sfml",
+    "glfw",
+    "wxwidgets",
+    "raylib",
+];
 
 /// `src_files` : chemins (relatifs à la racine du projet, casse d'origine) des fichiers .rs, .go, .py, .js
 /// et des .jar exécutables de l'archive.
-pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallback_name: &str, src_files: &[String]) -> Option<Detection> {
+pub fn detect(
+    files: &[BuildFile],
+    exec_names: &[String],
+    has_elf: bool,
+    fallback_name: &str,
+    src_files: &[String],
+) -> Option<Detection> {
     if has_elf {
         return None;
     }
     let get = |n: &str| files.iter().find(|f| f.name == n);
 
     if let Some(f) = get("cargo.toml") {
-        return Some(Detection::Supported(cargo(f, files, fallback_name, src_files)));
+        return Some(Detection::Supported(cargo(
+            f,
+            files,
+            fallback_name,
+            src_files,
+        )));
     }
     if let Some(f) = get("go.mod") {
-        let module = f.content.lines().find_map(|l| l.trim().strip_prefix("module ")).map(|m| m.trim().trim_matches('"').to_string());
+        let module = f
+            .content
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("module "))
+            .map(|m| m.trim().trim_matches('"').to_string());
         let name = module.and_then(|m| {
             let mut segs: Vec<&str> = m.split('/').collect();
-            if segs.len() > 1 && segs.last().is_some_and(|s| s.len() > 1 && s.starts_with('v') && s[1..].chars().all(|c| c.is_ascii_digit())) {
+            if segs.len() > 1
+                && segs.last().is_some_and(|s| {
+                    s.len() > 1 && s.starts_with('v') && s[1..].chars().all(|c| c.is_ascii_digit())
+                })
+            {
                 segs.pop();
             }
             segs.last().map(|s| s.to_string())
@@ -291,52 +374,104 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
         if !has_main {
             bin.1 = false;
         }
-        let mut p = project(BuildSystem::Go, bin, &f.content, &["fyne.io", "gioui.org", "gotk3", "gotk4", "ebiten"]);
+        let mut p = project(
+            BuildSystem::Go,
+            bin,
+            &f.content,
+            &["fyne.io", "gioui.org", "gotk3", "gotk4", "ebiten"],
+        );
         if !has_main {
-            p.notes.push("Aucun main.go ni dossier cmd/ : le point d'entrée n'a pas été repéré.".into());
+            p.notes.push(
+                "Aucun main.go ni dossier cmd/ : le point d'entrée n'a pas été repéré.".into(),
+            );
         }
-        p.notes.push("Les modules Go sont téléchargés pendant la compilation.".into());
+        p.notes
+            .push("Les modules Go sont téléchargés pendant la compilation.".into());
         return Some(Detection::Supported(p));
     }
     if let Some(f) = get("meson.build") {
         let name = call_arg(&f.content, "executable").or_else(|| call_arg(&f.content, "project"));
         let certain_exe = call_arg(&f.content, "executable").is_some();
         let (n, c) = pick(name, fallback_name);
-        let mut p = project(BuildSystem::Meson, (n, c && certain_exe), &f.content, &GUI_NATIVE);
+        let mut p = project(
+            BuildSystem::Meson,
+            (n, c && certain_exe),
+            &f.content,
+            &GUI_NATIVE,
+        );
         if !certain_exe {
-            p.notes.push("Nom du binaire déduit du nom du projet.".into());
+            p.notes
+                .push("Nom du binaire déduit du nom du projet.".into());
         }
         return Some(Detection::Supported(p));
     }
     if let Some(f) = get("cmakelists.txt") {
         let exe = call_arg(&f.content, "add_executable");
         let literal = exe.as_ref().is_some_and(|e| !e.contains('$'));
-        let name = if literal { exe } else { call_arg(&f.content, "project") };
+        let name = if literal {
+            exe
+        } else {
+            call_arg(&f.content, "project")
+        };
         let (n, c) = pick(name, fallback_name);
-        let mut p = project(BuildSystem::CMake, (n, c && literal), &f.content, &GUI_NATIVE);
+        let mut p = project(
+            BuildSystem::CMake,
+            (n, c && literal),
+            &f.content,
+            &GUI_NATIVE,
+        );
         if !literal {
-            p.notes.push("Nom du binaire déduit du nom du projet.".into());
+            p.notes
+                .push("Nom du binaire déduit du nom du projet.".into());
         }
         return Some(Detection::Supported(p));
     }
     let ac = get("configure.ac").or_else(|| get("configure.in"));
     let am = get("makefile.am");
-    let only_autotools_scripts = exec_names.iter().all(|n| matches!(n.as_str(), "autogen.sh" | "bootstrap" | "config.guess" | "config.sub" | "install-sh" | "missing" | "depcomp" | "compile" | "ltmain.sh"));
+    let only_autotools_scripts = exec_names.iter().all(|n| {
+        matches!(
+            n.as_str(),
+            "autogen.sh"
+                | "bootstrap"
+                | "config.guess"
+                | "config.sub"
+                | "install-sh"
+                | "missing"
+                | "depcomp"
+                | "compile"
+                | "ltmain.sh"
+        )
+    });
     if ac.is_some() || am.is_some() || (get("configure").is_some() && only_autotools_scripts) {
         let from_am = am.and_then(|f| {
             f.content.lines().find_map(|l| {
                 let t = l.trim();
-                let rest = t.strip_prefix("bin_PROGRAMS")?.trim_start().strip_prefix('=')?;
+                let rest = t
+                    .strip_prefix("bin_PROGRAMS")?
+                    .trim_start()
+                    .strip_prefix('=')?;
                 rest.split_whitespace().next().map(String::from)
             })
         });
         let from_ac = ac.and_then(|f| call_arg(&f.content, "ac_init"));
-        let certain = from_am.as_ref().is_some_and(|n| valid_bin(n) && !n.contains('$'));
+        let certain = from_am
+            .as_ref()
+            .is_some_and(|n| valid_bin(n) && !n.contains('$'));
         let (n, c) = pick(from_am.or(from_ac), fallback_name);
-        let text = format!("{}\n{}", ac.map(|f| f.content.as_str()).unwrap_or(""), am.map(|f| f.content.as_str()).unwrap_or(""));
-        let mut p = project(BuildSystem::Autotools, (n, c && certain), &text, &GUI_NATIVE);
+        let text = format!(
+            "{}\n{}",
+            ac.map(|f| f.content.as_str()).unwrap_or(""),
+            am.map(|f| f.content.as_str()).unwrap_or("")
+        );
+        let mut p = project(
+            BuildSystem::Autotools,
+            (n, c && certain),
+            &text,
+            &GUI_NATIVE,
+        );
         if !(c && certain) {
-            p.notes.push("Nom du binaire déduit du nom du projet.".into());
+            p.notes
+                .push("Nom du binaire déduit du nom du projet.".into());
         }
         return Some(Detection::Supported(p));
     }
@@ -353,7 +488,11 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
         if let Some(p) = python(files, fallback_name, src_files, root_make) {
             return Some(Detection::Supported(p));
         }
-        let jars: Vec<String> = src_files.iter().filter(|p| p.to_ascii_lowercase().ends_with(".jar")).cloned().collect();
+        let jars: Vec<String> = src_files
+            .iter()
+            .filter(|p| p.to_ascii_lowercase().ends_with(".jar"))
+            .cloned()
+            .collect();
         if !jars.is_empty() {
             return Some(Detection::Supported(java(&jars, fallback_name)));
         }
@@ -363,7 +502,10 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
             let name = f.content.lines().find_map(|l| {
                 let (k, v) = l.split_once('=')?;
                 let k = k.trim().trim_end_matches([':', '?', '+']).trim();
-                if matches!(k, "TARGET" | "BIN" | "BINARY" | "PROG" | "PROGRAM" | "EXEC" | "NAME" | "APP") {
+                if matches!(
+                    k,
+                    "TARGET" | "BIN" | "BINARY" | "PROG" | "PROGRAM" | "EXEC" | "NAME" | "APP"
+                ) {
                     v.split_whitespace().next().map(String::from)
                 } else {
                     None
@@ -411,17 +553,34 @@ fn contains_any(text: &str, words: &[&str]) -> bool {
 
 fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
     let json: Option<serde_json::Value> = serde_json::from_str(&f.content).ok();
-    let text = |k: &str| json.as_ref().and_then(|j| j.get(k)).and_then(|v| v.as_str()).map(String::from);
-    let pkg_name = text("name").map(|n| n.rsplit('/').next().unwrap_or("").to_string()).filter(|n| !n.is_empty());
+    let text = |k: &str| {
+        json.as_ref()
+            .and_then(|j| j.get(k))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    };
+    let pkg_name = text("name")
+        .map(|n| n.rsplit('/').next().unwrap_or("").to_string())
+        .filter(|n| !n.is_empty());
     let dep_keys: Vec<String> = ["dependencies", "devDependencies", "optionalDependencies"]
         .iter()
-        .filter_map(|k| json.as_ref().and_then(|j| j.get(*k)).and_then(|v| v.as_object()))
+        .filter_map(|k| {
+            json.as_ref()
+                .and_then(|j| j.get(*k))
+                .and_then(|v| v.as_object())
+        })
         .flat_map(|o| o.keys().cloned())
         .collect();
     let electron = dep_keys.iter().any(|d| d == "electron");
-    let scripts = json.as_ref().and_then(|j| j.get("scripts")).and_then(|v| v.as_object());
+    let scripts = json
+        .as_ref()
+        .and_then(|j| j.get("scripts"))
+        .and_then(|v| v.as_object());
     let build_script = scripts.is_some_and(|s| s.contains_key("build"));
-    let start = scripts.and_then(|s| s.get("start")).and_then(|v| v.as_str()).map(String::from);
+    let start = scripts
+        .and_then(|s| s.get("start"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     // Fichier à lancer : « bin », puis « main », puis « scripts.start » (node fichier.js), puis des noms usuels.
     let mut bin_key: Option<String> = None;
@@ -430,7 +589,11 @@ fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
         if let Some(path) = b.as_str() {
             entry = Some(clean_rel(path));
         } else if let Some(o) = b.as_object() {
-            let pick_key = pkg_name.as_ref().filter(|n| o.contains_key(*n)).cloned().or_else(|| o.keys().next().cloned());
+            let pick_key = pkg_name
+                .as_ref()
+                .filter(|n| o.contains_key(*n))
+                .cloned()
+                .or_else(|| o.keys().next().cloned());
             if let Some(k) = pick_key {
                 entry = o.get(&k).and_then(|v| v.as_str()).map(clean_rel);
                 bin_key = Some(k);
@@ -453,7 +616,17 @@ fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
     }
     let roots = root_names(src, is_js);
     if entry.as_deref().is_none_or(|e| e.is_empty() || e == ".") {
-        entry = ["index.js", "server.js", "app.js", "main.js", "cli.js", "index.mjs", "main.mjs"].iter().find_map(|c| find_ci(&roots, c).cloned());
+        entry = [
+            "index.js",
+            "server.js",
+            "app.js",
+            "main.js",
+            "cli.js",
+            "index.mjs",
+            "main.mjs",
+        ]
+        .iter()
+        .find_map(|c| find_ci(&roots, c).cloned());
     }
     let mut alternatives: Vec<String> = roots.iter().map(|s| (*s).clone()).collect();
     if let Some(e) = &entry
@@ -473,7 +646,8 @@ fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
     p.entry = entry.clone().map(Entry::File).unwrap_or_default();
     p.notes.push("Les dépendances npm sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).".into());
     if build_script {
-        p.notes.push("Le script « build » de package.json sera exécuté avant l'empaquetage.".into());
+        p.notes
+            .push("Le script « build » de package.json sera exécuté avant l'empaquetage.".into());
     }
     if electron {
         p.blocker = Some("Ce projet utilise Electron : sa construction depuis les sources n'est pas prise en charge. Utilisez plutôt l'archive de l'application déjà compilée (celle que le projet distribue pour Linux).".into());
@@ -486,7 +660,22 @@ fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
     {
         p.notes.push(format!("Le fichier « {e} » n'a pas été repéré à la racine de l'archive ; vérifiez-le dans « Point d'entrée »."));
     }
-    let net = ["express", "fastify", "koa", "axios", "node-fetch", "got", "undici", "ws", "socket.io", "discord.js", "telegraf", "next", "nuxt", "request"];
+    let net = [
+        "express",
+        "fastify",
+        "koa",
+        "axios",
+        "node-fetch",
+        "got",
+        "undici",
+        "ws",
+        "socket.io",
+        "discord.js",
+        "telegraf",
+        "next",
+        "nuxt",
+        "request",
+    ];
     p.network = dep_keys.iter().any(|d| net.contains(&d.as_str()));
     p
 }
@@ -507,12 +696,17 @@ fn py_kwarg(text: &str, key: &str) -> Option<String> {
     while let Some(i) = text[from..].find(key) {
         let start = from + i;
         from = start + key.len();
-        let before_ok = start == 0 || !(text.as_bytes()[start - 1].is_ascii_alphanumeric() || text.as_bytes()[start - 1] == b'_');
+        let before_ok = start == 0
+            || !(text.as_bytes()[start - 1].is_ascii_alphanumeric()
+                || text.as_bytes()[start - 1] == b'_');
         let rest = text[from..].trim_start();
         if before_ok && let Some(rest) = rest.strip_prefix('=') {
             let rest = rest.trim_start();
             if let Some(q) = rest.chars().next().filter(|c| matches!(c, '\'' | '"')) {
-                let val: String = rest[1..].chars().take_while(|c| *c != q && *c != '\n').collect();
+                let val: String = rest[1..]
+                    .chars()
+                    .take_while(|c| *c != q && *c != '\n')
+                    .collect();
                 if !val.is_empty() {
                     return Some(val);
                 }
@@ -575,10 +769,18 @@ fn setup_scripts(setup_py: &str, setup_cfg: &str) -> Vec<String> {
 }
 
 fn valid_module(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.')) && !s.starts_with(|c: char| c.is_ascii_digit())
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.'))
+        && !s.starts_with(|c: char| c.is_ascii_digit())
 }
 
-fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) -> Option<SourceProject> {
+fn python(
+    files: &[BuildFile],
+    fallback: &str,
+    src: &[String],
+    root_make: bool,
+) -> Option<SourceProject> {
     let get = |n: &str| files.iter().find(|f| f.name == n);
     let pyproject = get("pyproject.toml");
     let setup_py = get("setup.py");
@@ -586,14 +788,25 @@ fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) 
     let reqs = get("requirements.txt");
     let table: Option<toml::Table> = pyproject.and_then(|f| f.content.parse().ok());
     let has = |path: &[&str]| table.as_ref().and_then(|t| toml_path(t, path)).is_some();
-    let installable = has(&["build-system"]) || has(&["project"]) || has(&["tool", "poetry"]) || setup_py.is_some() || setup_cfg.is_some();
+    let installable = has(&["build-system"])
+        || has(&["project"])
+        || has(&["tool", "poetry"])
+        || setup_py.is_some()
+        || setup_cfg.is_some();
 
     let is_py = |p: &str| p.to_ascii_lowercase().ends_with(".py");
     let root_py = root_names(src, is_py);
-    let loose = ["main.py", "__main__.py", "app.py", "run.py"].iter().find_map(|c| find_ci(&root_py, c).cloned());
-    let helper = |p: &&String| !matches!(p.to_ascii_lowercase().as_str(), "setup.py" | "conftest.py");
+    let loose = ["main.py", "__main__.py", "app.py", "run.py"]
+        .iter()
+        .find_map(|c| find_ci(&root_py, c).cloned());
+    let helper =
+        |p: &&String| !matches!(p.to_ascii_lowercase().as_str(), "setup.py" | "conftest.py");
     let candidates: Vec<&String> = root_py.iter().copied().filter(helper).collect();
-    let only = if candidates.len() == 1 { Some(candidates[0].clone()) } else { None };
+    let only = if candidates.len() == 1 {
+        Some(candidates[0].clone())
+    } else {
+        None
+    };
     if !installable && loose.is_none() && !(reqs.is_some() && only.is_some()) {
         return None;
     }
@@ -604,20 +817,29 @@ fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) 
 
     let proj_name = table
         .as_ref()
-        .and_then(|t| toml_path(t, &["project", "name"]).or_else(|| toml_path(t, &["tool", "poetry", "name"])))
+        .and_then(|t| {
+            toml_path(t, &["project", "name"]).or_else(|| toml_path(t, &["tool", "poetry", "name"]))
+        })
         .and_then(|v| v.as_str())
         .map(String::from)
         .or_else(|| setup_py.and_then(|f| py_kwarg(&f.content, "name")));
 
     let mut scripts: Vec<String> = Vec::new();
     if let Some(t) = &table {
-        for path in [&["project", "gui-scripts"][..], &["project", "scripts"][..], &["tool", "poetry", "scripts"][..]] {
+        for path in [
+            &["project", "gui-scripts"][..],
+            &["project", "scripts"][..],
+            &["tool", "poetry", "scripts"][..],
+        ] {
             if let Some(tbl) = toml_path(t, path).and_then(|v| v.as_table()) {
                 scripts.extend(tbl.keys().filter(|k| valid_bin(k)).cloned());
             }
         }
     }
-    for n in setup_scripts(setup_py.map(|f| f.content.as_str()).unwrap_or(""), setup_cfg.map(|f| f.content.as_str()).unwrap_or("")) {
+    for n in setup_scripts(
+        setup_py.map(|f| f.content.as_str()).unwrap_or(""),
+        setup_cfg.map(|f| f.content.as_str()).unwrap_or(""),
+    ) {
         if !scripts.contains(&n) {
             scripts.push(n);
         }
@@ -659,11 +881,48 @@ fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) 
     }
     let (bin, _) = pick(bin_src.map(|n| slugify(&n)), fallback);
     let mut p = project(BuildSystem::Python, (bin, true), "", &[]);
-    p.gui = contains_any(&blob, &["pyqt5", "pyqt6", "pyside2", "pyside6", "pygobject", "tkinter", "customtkinter", "pygame", "kivy", "wxpython", "dearpygui", "flet", "pyglet", "arcade", "toga", "textual-web"]);
+    p.gui = contains_any(
+        &blob,
+        &[
+            "pyqt5",
+            "pyqt6",
+            "pyside2",
+            "pyside6",
+            "pygobject",
+            "tkinter",
+            "customtkinter",
+            "pygame",
+            "kivy",
+            "wxpython",
+            "dearpygui",
+            "flet",
+            "pyglet",
+            "arcade",
+            "toga",
+            "textual-web",
+        ],
+    );
     p.gtk = contains_any(&blob, &["pygobject"]);
     p.installable = installable;
     p.requirements = reqs.is_some();
-    p.network = contains_any(&blob, &["requests", "httpx", "aiohttp", "urllib3", "flask", "django", "fastapi", "tornado", "websockets", "discord", "telegram", "pycurl", "paramiko"]);
+    p.network = contains_any(
+        &blob,
+        &[
+            "requests",
+            "httpx",
+            "aiohttp",
+            "urllib3",
+            "flask",
+            "django",
+            "fastapi",
+            "tornado",
+            "websockets",
+            "discord",
+            "telegram",
+            "pycurl",
+            "paramiko",
+        ],
+    );
     if matches!(entry, Entry::File(_)) {
         let mut alts: Vec<String> = candidates.iter().map(|s| (*s).clone()).collect();
         if let Entry::File(e) = &entry
@@ -698,7 +957,14 @@ fn python(files: &[BuildFile], fallback: &str, src: &[String], root_make: bool) 
 fn java(jars: &[String], fallback: &str) -> SourceProject {
     let slug = slugify(fallback);
     let mut sorted = jars.to_vec();
-    sorted.sort_by_key(|p| (p.matches('/').count(), !p.to_ascii_lowercase().contains(&slug), p.len(), p.clone()));
+    sorted.sort_by_key(|p| {
+        (
+            p.matches('/').count(),
+            !p.to_ascii_lowercase().contains(&slug),
+            p.len(),
+            p.clone(),
+        )
+    });
     let main = sorted[0].clone();
     let (bin, _) = pick(Some(slug), fallback);
     let mut p = project(BuildSystem::Java, (bin, true), "", &[]);
@@ -712,21 +978,49 @@ fn java(jars: &[String], fallback: &str) -> SourceProject {
     p
 }
 
-fn cargo(f: &BuildFile, files: &[BuildFile], fallback: &str, src_files: &[String]) -> SourceProject {
+fn cargo(
+    f: &BuildFile,
+    files: &[BuildFile],
+    fallback: &str,
+    src_files: &[String],
+) -> SourceProject {
     let table: Option<toml::Table> = f.content.parse().ok();
-    let pkg = table.as_ref().and_then(|t| t.get("package")).and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from);
+    let pkg = table
+        .as_ref()
+        .and_then(|t| t.get("package"))
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .map(String::from);
     let bins: Vec<String> = table
         .as_ref()
         .and_then(|t| t.get("bin"))
         .and_then(|b| b.as_array())
-        .map(|a| a.iter().filter_map(|x| x.get("name").and_then(|n| n.as_str()).map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     let workspace = table.as_ref().is_some_and(|t| t.contains_key("workspace")) && pkg.is_none();
     let name = match &pkg {
         Some(p) if bins.is_empty() || bins.contains(p) => Some(p.clone()),
         _ => bins.first().cloned().or(pkg.clone()),
     };
-    let gui_words = ["eframe", "egui", "iced", "slint", "gtk4", "relm4", "tauri", "fltk", "floem", "winit", "sdl2", "bevy", "macroquad"];
+    let gui_words = [
+        "eframe",
+        "egui",
+        "iced",
+        "slint",
+        "gtk4",
+        "relm4",
+        "tauri",
+        "fltk",
+        "floem",
+        "winit",
+        "sdl2",
+        "bevy",
+        "macroquad",
+    ];
     // Espace de travail : le programme à installer est celui du membre qui dépend d'une bibliothèque graphique.
     let mut name = name;
     let mut workspace_gui_bin = false;
@@ -743,7 +1037,12 @@ fn cargo(f: &BuildFile, files: &[BuildFile], fallback: &str, src_files: &[String
                 .and_then(|a| a.first())
                 .and_then(|x| x.get("name"))
                 .and_then(|n| n.as_str())
-                .or_else(|| t.as_ref().and_then(|t| t.get("package")).and_then(|p| p.get("name")).and_then(|n| n.as_str()));
+                .or_else(|| {
+                    t.as_ref()
+                        .and_then(|t| t.get("package"))
+                        .and_then(|p| p.get("name"))
+                        .and_then(|n| n.as_str())
+                });
             if let Some(b) = bin {
                 name = Some(b.to_string());
                 workspace_gui_bin = true;
@@ -753,13 +1052,20 @@ fn cargo(f: &BuildFile, files: &[BuildFile], fallback: &str, src_files: &[String
     }
     let certain = name.is_some() && (!workspace || workspace_gui_bin);
     let (n, _) = pick(name, fallback);
-    let all_toml: String = files.iter().filter(|m| m.name == "cargo.toml" || m.name == "member:cargo.toml").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n");
+    let all_toml: String = files
+        .iter()
+        .filter(|m| m.name == "cargo.toml" || m.name == "member:cargo.toml")
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut p = project(BuildSystem::Cargo, (n, certain), &all_toml, &gui_words);
-    p.devices = any_of(&all_toml, &["hidapi", "rusb", "libusb", "evdev", "udev", "serialport"])
-        || src_files.iter().any(|x| {
-            let l = x.to_ascii_lowercase();
-            l.contains("hidraw") || l.contains("usb")
-        });
+    p.devices = any_of(
+        &all_toml,
+        &["hidapi", "rusb", "libusb", "evdev", "udev", "serialport"],
+    ) || src_files.iter().any(|x| {
+        let l = x.to_ascii_lowercase();
+        l.contains("hidraw") || l.contains("usb")
+    });
     if p.devices {
         p.notes.push("Accès direct au matériel (USB/HID) détecté : la permission « tous les périphériques » est accordée.".into());
     }
@@ -771,9 +1077,11 @@ fn cargo(f: &BuildFile, files: &[BuildFile], fallback: &str, src_files: &[String
         p.blocker = Some("Ce projet Rust ne contient pas de programme (ni src/main.rs, ni section [[bin]]) : c'est une bibliothèque, il n'y a rien à lancer.".into());
     }
     if workspace && !workspace_gui_bin {
-        p.notes.push("Espace de travail Cargo : indiquez le nom du binaire à installer.".into());
+        p.notes
+            .push("Espace de travail Cargo : indiquez le nom du binaire à installer.".into());
     }
-    p.notes.push("Les dépendances Rust sont téléchargées pendant la compilation (crates.io).".into());
+    p.notes
+        .push("Les dépendances Rust sont téléchargées pendant la compilation (crates.io).".into());
     p
 }
 
@@ -790,9 +1098,26 @@ pub fn scan_host_tools(system: BuildSystem) -> Vec<HostTool> {
         .host_tools()
         .iter()
         .map(|(prog, args)| {
-            let out = crate::host::cmd(prog).args(*args).env("LC_ALL", "C").stdin(Stdio::null()).stderr(Stdio::null()).output();
-            let version = out.ok().filter(|o| o.status.success()).and_then(|o| String::from_utf8_lossy(&o.stdout).lines().next().map(|l| l.trim().to_string())).filter(|l| !l.is_empty());
-            HostTool { name: (*prog).to_string(), version }
+            let out = crate::host::cmd(prog)
+                .args(*args)
+                .env("LC_ALL", "C")
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+            let version = out
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .next()
+                        .map(|l| l.trim().to_string())
+                })
+                .filter(|l| !l.is_empty());
+            HostTool {
+                name: (*prog).to_string(),
+                version,
+            }
         })
         .collect()
 }
@@ -826,10 +1151,27 @@ pub fn parse_refs(out: &str) -> Vec<(String, String)> {
 }
 
 pub fn scan_flatpak() -> FlatpakState {
-    let run = |args: &[&str]| crate::host::cmd("flatpak").args(args).env("LC_ALL", "C").stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success());
-    let Some(_) = run(&["--version"]) else { return FlatpakState::default() };
-    let refs = run(&["list", "--runtime", "--columns=application,branch"]).map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
-    let has_flathub = run(&["remotes", "--user", "--columns=name"]).is_some_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim() == "flathub"));
+    let run = |args: &[&str]| {
+        crate::host::cmd("flatpak")
+            .args(args)
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    };
+    let Some(_) = run(&["--version"]) else {
+        return FlatpakState::default();
+    };
+    let refs = run(&["list", "--runtime", "--columns=application,branch"])
+        .map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+    let has_flathub = run(&["remotes", "--user", "--columns=name"]).is_some_and(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .any(|l| l.trim() == "flathub")
+    });
     // Catalogue Flathub (utilisateur ou système) pour connaître les branches les plus récentes.
     // D'abord le cache local (instantané), puis le réseau (limité à 25 s) seulement si le cache est vide.
     let ls = |cached: bool, secs: u64| {
@@ -839,14 +1181,30 @@ pub fn scan_flatpak() -> FlatpakState {
             c.arg("--cached");
         }
         c.arg("flathub").env("LC_ALL", "C");
-        crate::host::output_timeout(c, secs).filter(|o| o.status.success()).map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+        crate::host::output_timeout(c, secs)
+            .filter(|o| o.status.success())
+            .map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or_default()
     };
     let mut remote = ls(true, 10);
     if !remote.iter().any(|(i, _)| i == "org.freedesktop.Sdk") {
         remote = ls(false, 25);
     }
-    let user_refs = run(&["list", "--user", "--runtime", "--columns=application,branch"]).map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default();
-    FlatpakState { available: true, refs, has_flathub, remote, user_refs }
+    let user_refs = run(&[
+        "list",
+        "--user",
+        "--runtime",
+        "--columns=application,branch",
+    ])
+    .map(|o| parse_refs(&String::from_utf8_lossy(&o.stdout)))
+    .unwrap_or_default();
+    FlatpakState {
+        available: true,
+        refs,
+        has_flathub,
+        remote,
+        user_refs,
+    }
 }
 
 fn version_key(v: &str) -> Vec<u32> {
@@ -859,7 +1217,11 @@ fn offered(state: &FlatpakState, id: &str, branch: &str) -> bool {
 
 /// Extension à utiliser sur la branche `version` : une extension déjà installée, sinon la plus récente
 /// proposée par Flathub, sinon la préférée (qui sera à installer).
-pub fn resolve_extension(system: BuildSystem, version: &str, state: &FlatpakState) -> Option<String> {
+pub fn resolve_extension(
+    system: BuildSystem,
+    version: &str,
+    state: &FlatpakState,
+) -> Option<String> {
     let c = system.extension_candidates();
     c.iter()
         .find(|id| state.has(id, version))
@@ -874,9 +1236,16 @@ pub fn resolve_extension(system: BuildSystem, version: &str, state: &FlatpakStat
 pub fn pick_branch(state: &FlatpakState, exts: &[&str]) -> String {
     let numeric = |b: &str| !b.is_empty() && b.split('.').all(|x| x.parse::<u32>().is_ok());
     let mut best = FDO_VERSION.to_string();
-    let candidates = state.refs.iter().chain(state.remote.iter()).filter(|(i, _)| i == "org.freedesktop.Sdk").map(|(_, b)| b.clone());
+    let candidates = state
+        .refs
+        .iter()
+        .chain(state.remote.iter())
+        .filter(|(i, _)| i == "org.freedesktop.Sdk")
+        .map(|(_, b)| b.clone());
     for b in candidates {
-        let ok = offered(state, "org.freedesktop.Platform", &b) && offered(state, "org.freedesktop.Sdk", &b) && (exts.is_empty() || exts.iter().any(|e| offered(state, e, &b)));
+        let ok = offered(state, "org.freedesktop.Platform", &b)
+            && offered(state, "org.freedesktop.Sdk", &b)
+            && (exts.is_empty() || exts.iter().any(|e| offered(state, e, &b)));
         if numeric(&b) && version_key(&b) > version_key(&best) && ok {
             best = b;
         }
@@ -888,8 +1257,14 @@ pub fn pick_branch(state: &FlatpakState, exts: &[&str]) -> String {
 /// celles strictement plus anciennes que la plus récente branche du SDK installée, hors `keep`.
 pub fn cleanup_candidates(state: &FlatpakState, keep: &str) -> Vec<(String, String)> {
     let numeric = |b: &str| !b.is_empty() && b.split('.').all(|x| x.parse::<u32>().is_ok());
-    let is_sdk = |id: &str| id == "org.freedesktop.Sdk" || id.starts_with("org.freedesktop.Sdk.Extension.");
-    let newest = state.user_refs.iter().filter(|(i, b)| i == "org.freedesktop.Sdk" && numeric(b)).map(|(_, b)| version_key(b)).max();
+    let is_sdk =
+        |id: &str| id == "org.freedesktop.Sdk" || id.starts_with("org.freedesktop.Sdk.Extension.");
+    let newest = state
+        .user_refs
+        .iter()
+        .filter(|(i, b)| i == "org.freedesktop.Sdk" && numeric(b))
+        .map(|(_, b)| version_key(b))
+        .max();
     let Some(newest) = newest else { return vec![] };
     let mut v: Vec<_> = state
         .user_refs
@@ -906,9 +1281,13 @@ pub fn cleanup_plan(cands: &[(String, String)]) -> Vec<Vec<String>> {
     if cands.is_empty() {
         return vec![];
     }
-    let mut c: Vec<String> = ["flatpak", "uninstall", "--user", "-y"].map(String::from).to_vec();
+    let mut c: Vec<String> = ["flatpak", "uninstall", "--user", "-y"]
+        .map(String::from)
+        .to_vec();
     c.extend(cands.iter().map(|(i, b)| format!("{i}//{b}")));
-    let unused = ["flatpak", "uninstall", "--user", "--unused", "-y"].map(String::from).to_vec();
+    let unused = ["flatpak", "uninstall", "--user", "--unused", "-y"]
+        .map(String::from)
+        .to_vec();
     vec![c, unused]
 }
 
@@ -928,15 +1307,30 @@ impl Component {
     }
 }
 
-pub fn components(system: BuildSystem, runtime: RuntimeKind, version: &str, state: &FlatpakState) -> Vec<Component> {
+pub fn components(
+    system: BuildSystem,
+    runtime: RuntimeKind,
+    version: &str,
+    state: &FlatpakState,
+) -> Vec<Component> {
     let mut v = vec![
         (runtime.platform().to_string(), "Runtime d'exécution"),
-        (runtime.sdk().to_string(), "SDK (compilateurs et outils de build)"),
+        (
+            runtime.sdk().to_string(),
+            "SDK (compilateurs et outils de build)",
+        ),
     ];
     if let Some(e) = resolve_extension(system, version, state) {
         v.push((e, system.extension_label()));
     }
-    v.into_iter().map(|(id, label)| Component { installed: state.has(&id, version), id, branch: version.to_string(), label: label.to_string() }).collect()
+    v.into_iter()
+        .map(|(id, label)| Component {
+            installed: state.has(&id, version),
+            id,
+            branch: version.to_string(),
+            label: label.to_string(),
+        })
+        .collect()
 }
 
 pub fn missing(c: &[Component]) -> Vec<Component> {
@@ -945,7 +1339,16 @@ pub fn missing(c: &[Component]) -> Vec<Component> {
 
 pub fn shell_line(argv: &[String]) -> String {
     argv.iter()
-        .map(|a| if a.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | ':' | '=' | '@' | '+' | '-')) { a.clone() } else { format!("'{}'", a.replace('\'', "'\\''")) })
+        .map(|a| {
+            if a.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || matches!(c, '.' | '_' | '/' | ':' | '=' | '@' | '+' | '-')
+            }) {
+                a.clone()
+            } else {
+                format!("'{}'", a.replace('\'', "'\\''"))
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -957,9 +1360,22 @@ pub fn install_plan(missing: &[Component], has_flathub: bool) -> Vec<Vec<String>
         return plan;
     }
     if !has_flathub {
-        plan.push(["flatpak", "remote-add", "--user", "--if-not-exists", "flathub", FLATHUB_URL].map(String::from).to_vec());
+        plan.push(
+            [
+                "flatpak",
+                "remote-add",
+                "--user",
+                "--if-not-exists",
+                "flathub",
+                FLATHUB_URL,
+            ]
+            .map(String::from)
+            .to_vec(),
+        );
     }
-    let mut c: Vec<String> = ["flatpak", "install", "--user", "-y", "flathub"].map(String::from).to_vec();
+    let mut c: Vec<String> = ["flatpak", "install", "--user", "-y", "flathub"]
+        .map(String::from)
+        .to_vec();
     c.extend(missing.iter().map(|m| m.reference()));
     plan.push(c);
     plan
@@ -982,7 +1398,11 @@ fn explain(tail: &[String]) -> String {
     if let Some(d) = diagnose(tail).into_iter().next() {
         return format!("{} : {}", d.title, d.explanation);
     }
-    tail.iter().rev().find(|l| !l.trim().is_empty()).cloned().unwrap_or_else(|| "L'installation a échoué.".into())
+    tail.iter()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| "L'installation a échoué.".into())
 }
 
 /// Exécute les commandes l'une après l'autre dans un thread.
@@ -997,8 +1417,16 @@ pub fn spawn_install(cmds: Vec<Vec<String>>, notify: Arc<dyn Fn() + Send + Sync>
                 let _ = tx.send(ToolMsg::Line(format!("$ {}", shell_line(argv))));
                 notify();
                 let mut cmd = crate::host::cmd(&argv[0]);
-                cmd.args(&argv[1..]).env("LC_ALL", "C").env("LANG", "C").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
-                let mut child = cmd.spawn().map_err(|e| format!("impossible de lancer {} : {e}", argv[0]))?;
+                cmd.args(&argv[1..])
+                    .env("LC_ALL", "C")
+                    .env("LANG", "C")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .process_group(0);
+                let mut child = cmd
+                    .spawn()
+                    .map_err(|e| format!("impossible de lancer {} : {e}", argv[0]))?;
                 let (ltx, lrx) = channel::<String>();
                 let mut readers = Vec::new();
                 if let Some(o) = child.stdout.take() {
@@ -1024,7 +1452,9 @@ pub fn spawn_install(cmds: Vec<Vec<String>>, notify: Arc<dyn Fn() + Send + Sync>
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                     if flag.load(Ordering::SeqCst) {
-                        let _ = Command::new("kill").args(["-TERM", "--", &format!("-{pid}")]).status();
+                        let _ = Command::new("kill")
+                            .args(["-TERM", "--", &format!("-{pid}")])
+                            .status();
                         let _ = child.kill();
                         break;
                     }
@@ -1053,25 +1483,52 @@ mod tests {
     use super::*;
 
     fn bf(name: &str, content: &str) -> BuildFile {
-        BuildFile { name: name.into(), content: content.into() }
+        BuildFile {
+            name: name.into(),
+            content: content.into(),
+        }
     }
 
     #[test]
     fn cargo_package_and_bin() {
-        let f = bf("cargo.toml", "[package]\nname = \"mon-outil\"\nversion = \"1.0.0\"\n[dependencies]\neframe = \"0.30\"\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
+        let f = bf(
+            "cargo.toml",
+            "[package]\nname = \"mon-outil\"\nversion = \"1.0.0\"\n[dependencies]\neframe = \"0.30\"\n",
+        );
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
         assert_eq!(p.system, BuildSystem::Cargo);
         assert_eq!(p.bin_name, "mon-outil");
         assert!(p.bin_certain && p.gui);
-        let f = bf("cargo.toml", "[package]\nname = \"lib-name\"\n[[bin]]\nname = \"cli\"\npath = \"src/main.rs\"\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
+        let f = bf(
+            "cargo.toml",
+            "[package]\nname = \"lib-name\"\n[[bin]]\nname = \"cli\"\npath = \"src/main.rs\"\n",
+        );
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
         assert_eq!(p.bin_name, "cli");
     }
 
     #[test]
     fn cargo_workspace_is_uncertain() {
         let f = bf("cargo.toml", "[workspace]\nmembers = [\"a\", \"b\"]\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "Mon Projet", &[]) else { panic!() };
+        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "Mon Projet", &[]) else {
+            panic!()
+        };
         assert!(!p.bin_certain);
         assert_eq!(p.bin_name, "mon-projet");
         assert!(!p.notes.is_empty());
@@ -1079,37 +1536,112 @@ mod tests {
 
     #[test]
     fn cargo_workspace_finds_gui_member_and_usb() {
-        let root = bf("cargo.toml", "[workspace]\nmembers = [\"proto\", \"gui\"]\n");
-        let gui = bf("member:cargo.toml", "[package]\nname = \"xblades-gui\"\n[[bin]]\nname = \"xblades-gui\"\npath = \"src/main.rs\"\n[dependencies]\neframe = \"0.29\"\n");
-        let src = ["proto/src/hidraw.rs".to_string(), "gui/src/main.rs".to_string()];
-        let Some(Detection::Supported(p)) = detect(&[root, gui], &[], false, "x", &src) else { panic!() };
+        let root = bf(
+            "cargo.toml",
+            "[workspace]\nmembers = [\"proto\", \"gui\"]\n",
+        );
+        let gui = bf(
+            "member:cargo.toml",
+            "[package]\nname = \"xblades-gui\"\n[[bin]]\nname = \"xblades-gui\"\npath = \"src/main.rs\"\n[dependencies]\neframe = \"0.29\"\n",
+        );
+        let src = [
+            "proto/src/hidraw.rs".to_string(),
+            "gui/src/main.rs".to_string(),
+        ];
+        let Some(Detection::Supported(p)) = detect(&[root, gui], &[], false, "x", &src) else {
+            panic!()
+        };
         assert!(p.gui && p.devices && p.bin_certain);
         assert_eq!(p.bin_name, "xblades-gui");
     }
 
     #[test]
     fn cmake_and_meson_names() {
-        let f = bf("cmakelists.txt", "cmake_minimum_required(VERSION 3.10)\nproject(Demo)\nfind_package(Qt6 REQUIRED)\nadd_executable(demo main.cpp)\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
-        assert_eq!((p.system, p.bin_name.as_str(), p.bin_certain, p.qt), (BuildSystem::CMake, "demo", true, true));
-        let f = bf("cmakelists.txt", "project(Demo)\nadd_executable(${PROJECT_NAME} main.cpp)\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
+        let f = bf(
+            "cmakelists.txt",
+            "cmake_minimum_required(VERSION 3.10)\nproject(Demo)\nfind_package(Qt6 REQUIRED)\nadd_executable(demo main.cpp)\n",
+        );
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
+        assert_eq!(
+            (p.system, p.bin_name.as_str(), p.bin_certain, p.qt),
+            (BuildSystem::CMake, "demo", true, true)
+        );
+        let f = bf(
+            "cmakelists.txt",
+            "project(Demo)\nadd_executable(${PROJECT_NAME} main.cpp)\n",
+        );
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
         assert_eq!((p.bin_name.as_str(), p.bin_certain), ("Demo", false));
-        let f = bf("meson.build", "project('viewer', 'c')\nexecutable('viewer-bin', 'main.c', dependencies: dependency('gtk4'))\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
-        assert_eq!((p.system, p.bin_name.as_str(), p.gtk), (BuildSystem::Meson, "viewer-bin", true));
+        let f = bf(
+            "meson.build",
+            "project('viewer', 'c')\nexecutable('viewer-bin', 'main.c', dependencies: dependency('gtk4'))\n",
+        );
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
+        assert_eq!(
+            (p.system, p.bin_name.as_str(), p.gtk),
+            (BuildSystem::Meson, "viewer-bin", true)
+        );
     }
 
     #[test]
     fn autotools_make_go() {
         let f = bf("configure.ac", "AC_INIT([hello], [1.0])\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &["autogen.sh".into()], false, "x", &[]) else { panic!() };
-        assert_eq!((p.system, p.bin_name.as_str()), (BuildSystem::Autotools, "hello"));
+        let Some(Detection::Supported(p)) = detect(&[f], &["autogen.sh".into()], false, "x", &[])
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (p.system, p.bin_name.as_str()),
+            (BuildSystem::Autotools, "hello")
+        );
         let f = bf("makefile", "CC=gcc\nTARGET = tool\nall: $(TARGET)\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
-        assert_eq!((p.system, p.bin_name.as_str(), p.bin_certain), (BuildSystem::Make, "tool", true));
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
+        assert_eq!(
+            (p.system, p.bin_name.as_str(), p.bin_certain),
+            (BuildSystem::Make, "tool", true)
+        );
         let f = bf("go.mod", "module github.com/me/gotool/v2\n\ngo 1.22\n");
-        let Some(Detection::Supported(p)) = detect(&[f], &[], false, "x", &["src/main.rs".to_string(), "main.go".to_string()]) else { panic!() };
+        let Some(Detection::Supported(p)) = detect(
+            &[f],
+            &[],
+            false,
+            "x",
+            &["src/main.rs".to_string(), "main.go".to_string()],
+        ) else {
+            panic!()
+        };
         assert_eq!((p.system, p.bin_name.as_str()), (BuildSystem::Go, "gotool"));
     }
 
@@ -1120,38 +1652,69 @@ mod tests {
         assert!(detect(&[f], &["run.sh".into()], false, "x", &[]).is_none());
         let f = bf("package.json", "{}");
         // package.json sans aucun point d'entrée : projet Node.js reconnu mais sans rien à lancer.
-        let Some(Detection::Supported(p)) = detect(std::slice::from_ref(&f), &[], false, "x", &[]) else { panic!() };
+        let Some(Detection::Supported(p)) = detect(std::slice::from_ref(&f), &[], false, "x", &[])
+        else {
+            panic!()
+        };
         assert!(p.blocker.is_some());
         assert!(detect(&[f], &["start.sh".into()], false, "x", &[]).is_none());
     }
 
     #[test]
     fn branch_and_components() {
-        let refs = parse_refs("org.freedesktop.Platform\t24.08\norg.freedesktop.Sdk\t24.08\norg.freedesktop.Sdk\t23.08\norg.gnome.Platform\t49\n");
-        let st = FlatpakState { available: true, refs, has_flathub: true, remote: vec![], user_refs: vec![] };
+        let refs = parse_refs(
+            "org.freedesktop.Platform\t24.08\norg.freedesktop.Sdk\t24.08\norg.freedesktop.Sdk\t23.08\norg.gnome.Platform\t49\n",
+        );
+        let st = FlatpakState {
+            available: true,
+            refs,
+            has_flathub: true,
+            remote: vec![],
+            user_refs: vec![],
+        };
         assert_eq!(pick_branch(&st, &[]), FDO_VERSION);
         let comps = components(BuildSystem::Cargo, RuntimeKind::Freedesktop, "24.08", &st);
         assert_eq!(comps.len(), 3);
         let miss = missing(&comps);
         assert_eq!(miss.len(), 1);
-        assert_eq!(miss[0].reference(), "org.freedesktop.Sdk.Extension.rust-stable//24.08");
+        assert_eq!(
+            miss[0].reference(),
+            "org.freedesktop.Sdk.Extension.rust-stable//24.08"
+        );
         let plan = install_plan(&miss, true);
         assert_eq!(plan.len(), 1);
-        assert_eq!(shell_line(&plan[0]), "flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//24.08");
+        assert_eq!(
+            shell_line(&plan[0]),
+            "flatpak install --user -y flathub org.freedesktop.Sdk.Extension.rust-stable//24.08"
+        );
         let plan = install_plan(&miss, false);
         assert_eq!(plan.len(), 2);
-        assert!(shell_line(&plan[0]).starts_with("flatpak remote-add --user --if-not-exists flathub https://"));
+        assert!(
+            shell_line(&plan[0])
+                .starts_with("flatpak remote-add --user --if-not-exists flathub https://")
+        );
         assert_eq!(pick_branch(&FlatpakState::default(), &[]), FDO_VERSION);
         // C/C++ : pas d'extension
-        assert_eq!(components(BuildSystem::CMake, RuntimeKind::Freedesktop, "25.08", &st).len(), 2);
+        assert_eq!(
+            components(BuildSystem::CMake, RuntimeKind::Freedesktop, "25.08", &st).len(),
+            2
+        );
     }
 
     #[test]
     fn newest_remote_branch_with_extension() {
-        let mut st = FlatpakState { refs: parse_refs("org.freedesktop.Sdk\t24.08\n"), ..Default::default() };
-        st.remote = parse_refs("org.freedesktop.Platform\t26.08\norg.freedesktop.Sdk\t26.08\norg.freedesktop.Platform\t25.08\norg.freedesktop.Sdk\t25.08\norg.freedesktop.Sdk.Extension.rust-stable\t25.08\norg.freedesktop.Sdk\t25.08beta\n");
+        let mut st = FlatpakState {
+            refs: parse_refs("org.freedesktop.Sdk\t24.08\n"),
+            ..Default::default()
+        };
+        st.remote = parse_refs(
+            "org.freedesktop.Platform\t26.08\norg.freedesktop.Sdk\t26.08\norg.freedesktop.Platform\t25.08\norg.freedesktop.Sdk\t25.08\norg.freedesktop.Sdk.Extension.rust-stable\t25.08\norg.freedesktop.Sdk\t25.08beta\n",
+        );
         // 26.08 n'a pas l'extension Rust : on reste sur 25.08.
-        assert_eq!(pick_branch(&st, &["org.freedesktop.Sdk.Extension.rust-stable"]), "25.08");
+        assert_eq!(
+            pick_branch(&st, &["org.freedesktop.Sdk.Extension.rust-stable"]),
+            "25.08"
+        );
         // Sans extension requise, la plus récente gagne.
         assert_eq!(pick_branch(&st, &[]), "26.08");
     }
@@ -1159,23 +1722,43 @@ mod tests {
     #[test]
     fn cleanup_keeps_newest_and_selected() {
         let st = FlatpakState {
-            user_refs: parse_refs("org.freedesktop.Sdk\t23.08\norg.freedesktop.Sdk\t24.08\norg.freedesktop.Sdk\t25.08\norg.freedesktop.Sdk.Extension.rust-stable\t24.08\norg.freedesktop.Sdk.Extension.rust-stable\t25.08\norg.freedesktop.Platform\t24.08\norg.gnome.Sdk\t47\n"),
+            user_refs: parse_refs(
+                "org.freedesktop.Sdk\t23.08\norg.freedesktop.Sdk\t24.08\norg.freedesktop.Sdk\t25.08\norg.freedesktop.Sdk.Extension.rust-stable\t24.08\norg.freedesktop.Sdk.Extension.rust-stable\t25.08\norg.freedesktop.Platform\t24.08\norg.gnome.Sdk\t47\n",
+            ),
             ..Default::default()
         };
         let c = cleanup_candidates(&st, "25.08");
         let refs: Vec<String> = c.iter().map(|(i, b)| format!("{i}//{b}")).collect();
-        assert_eq!(refs, ["org.freedesktop.Sdk//23.08", "org.freedesktop.Sdk//24.08", "org.freedesktop.Sdk.Extension.rust-stable//24.08"]);
+        assert_eq!(
+            refs,
+            [
+                "org.freedesktop.Sdk//23.08",
+                "org.freedesktop.Sdk//24.08",
+                "org.freedesktop.Sdk.Extension.rust-stable//24.08"
+            ]
+        );
         assert_eq!(cleanup_plan(&c).len(), 2);
         assert!(cleanup_candidates(&FlatpakState::default(), "25.08").is_empty());
     }
 
     #[test]
     fn rust_library_is_blocked_and_go_without_main_is_uncertain() {
-        let lib = bf("cargo.toml", "[package]\nname = \"mylib\"\nversion = \"1.0.0\"\n");
-        let Some(Detection::Supported(p)) = detect(&[lib], &[], false, "x", &["src/lib.rs".to_string()]) else { panic!() };
+        let lib = bf(
+            "cargo.toml",
+            "[package]\nname = \"mylib\"\nversion = \"1.0.0\"\n",
+        );
+        let Some(Detection::Supported(p)) =
+            detect(&[lib], &[], false, "x", &["src/lib.rs".to_string()])
+        else {
+            panic!()
+        };
         assert!(p.blocker.is_some());
         let go = bf("go.mod", "module example.com/tool\n");
-        let Some(Detection::Supported(p)) = detect(&[go], &[], false, "x", &["util.go".to_string()]) else { panic!() };
+        let Some(Detection::Supported(p)) =
+            detect(&[go], &[], false, "x", &["util.go".to_string()])
+        else {
+            panic!()
+        };
         assert!(!p.bin_certain && p.blocker.is_none());
     }
 }

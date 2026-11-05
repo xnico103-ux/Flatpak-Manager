@@ -47,7 +47,10 @@ impl Arch {
         }
     }
     pub fn matches_host(&self) -> bool {
-        matches!((self, std::env::consts::ARCH), (Arch::X86_64, "x86_64") | (Arch::Aarch64, "aarch64"))
+        matches!(
+            (self, std::env::consts::ARCH),
+            (Arch::X86_64, "x86_64") | (Arch::Aarch64, "aarch64")
+        )
     }
 }
 
@@ -69,12 +72,9 @@ pub struct ExecCandidate {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct IconCandidate {
     pub raw: String,
-    pub rel: String,
     pub is_svg: bool,
-    pub width: u32,
     pub score: i32,
 }
 
@@ -123,13 +123,11 @@ pub struct Hints {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct ArchiveInfo {
     pub path: PathBuf,
     pub sha256: String,
     pub size: u64,
     pub unpacked_size: u64,
-    pub file_count: usize,
     pub top_dir: Option<String>,
     pub kind: AppKind,
     pub executables: Vec<ExecCandidate>,
@@ -137,8 +135,6 @@ pub struct ArchiveInfo {
     pub desktop: Option<DesktopInfo>,
     pub icons: Vec<IconCandidate>,
     pub lib_dirs: Vec<String>,
-    pub needed_libs: Vec<String>,
-    pub missing_libs: Vec<String>,
     pub hints: Hints,
     pub guessed_name: String,
     pub guessed_version: String,
@@ -227,13 +223,15 @@ pub fn open_decoder(path: &Path) -> Result<Option<Box<dyn Read>>> {
     let mut magic = [0u8; 6];
     let n = File::open(path)?.read(&mut magic)?;
     let m = &magic[..n];
-    let file = || -> Result<BufReader<File>> { Ok(BufReader::with_capacity(1 << 20, File::open(path)?)) };
+    let file =
+        || -> Result<BufReader<File>> { Ok(BufReader::with_capacity(1 << 20, File::open(path)?)) };
     Ok(if m.starts_with(&[0x1f, 0x8b]) {
         Some(Box::new(GzDecoder::new(file()?)))
     } else if m.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0x00]) {
         Some(Box::new(xz2::read::XzDecoder::new(file()?)))
     } else if m.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
-        let d = ruzstd::decoding::StreamingDecoder::new(file()?).map_err(|e| anyhow!("archive zstd invalide : {e}"))?;
+        let d = ruzstd::decoding::StreamingDecoder::new(file()?)
+            .map_err(|e| anyhow!("archive zstd invalide : {e}"))?;
         Some(Box::new(d))
     } else if m.starts_with(b"BZh") {
         Some(Box::new(bzip2::read::BzDecoder::new(file()?)))
@@ -298,15 +296,17 @@ fn desktop_exec_base(d: &DesktopInfo) -> Option<String> {
 /// Devine un nom et une version à partir d'un nom d'archive.
 pub fn guess_name_version(file_name: &str) -> (String, String) {
     let mut stem = file_name.to_string();
-    for ext in [".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tar.bz2", ".tbz2"] {
+    for ext in [
+        ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tar.bz2", ".tbz2",
+    ] {
         if let Some(s) = stem.strip_suffix(ext) {
             stem = s.to_string();
             break;
         }
     }
     const NOISE: &[&str] = &[
-        "linux", "x64", "x86", "x86_64", "amd64", "gnu", "portable", "bin", "64bit", "64", "release",
-        "aarch64", "arm64", "generic", "static",
+        "linux", "x64", "x86", "x86_64", "amd64", "gnu", "portable", "bin", "64bit", "64",
+        "release", "aarch64", "arm64", "generic", "static",
     ];
     let mut name = Vec::new();
     let mut version = String::new();
@@ -316,8 +316,7 @@ pub fn guess_name_version(file_name: &str) -> (String, String) {
         }
         let lower = tok.to_lowercase();
         let looks_version = lower.chars().next().is_some_and(|c| c.is_ascii_digit())
-            || (lower.starts_with('v')
-                && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit()));
+            || (lower.starts_with('v') && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit()));
         if version.is_empty() && looks_version {
             version = tok.trim_start_matches(['v', 'V']).to_string();
         } else if NOISE.contains(&lower.as_str()) {
@@ -359,7 +358,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
 
     // Format (détecté par les premiers octets, pas par l'extension)
     let Some(decoder) = open_decoder(path)? else {
-        push(&mut findings, Severity::Blocker, "Format non pris en charge", "Le fichier n'est pas une archive .tar compressée en gzip, xz, zstd ou bzip2.");
+        push(
+            &mut findings,
+            Severity::Blocker,
+            "Format non pris en charge",
+            "Le fichier n'est pas une archive .tar compressée en gzip, xz, zstd ou bzip2.",
+        );
         return Ok(empty_info(path, size, findings, guess_name, guess_version));
     };
 
@@ -399,7 +403,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         let mut entry = entry.map_err(|e| anyhow!("archive corrompue ou tronquée : {e}"))?;
         count += 1;
         if count > MAX_ENTRIES {
-            push(&mut findings, Severity::Blocker, "Trop de fichiers", format!("L'archive contient plus de {MAX_ENTRIES} entrées."));
+            push(
+                &mut findings,
+                Severity::Blocker,
+                "Trop de fichiers",
+                format!("L'archive contient plus de {MAX_ENTRIES} entrées."),
+            );
             break;
         }
         // En-têtes étendus (pax) : ajoutés par `git archive`, ils ne sont pas des fichiers de l'archive.
@@ -448,12 +457,17 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         let mode = entry.header().mode().unwrap_or(0);
         if ty.is_symlink() || ty.is_hard_link() {
             if let Ok(Some(target)) = entry.link_name()
-                && link_escapes(&parts, &target, ty.is_hard_link()) {
-                    unsafe_paths += 1;
-                    if unsafe_example.is_empty() {
-                        unsafe_example = format!("{} → {} (lien hors de l'archive)", epath.display(), target.display());
-                    }
+                && link_escapes(&parts, &target, ty.is_hard_link())
+            {
+                unsafe_paths += 1;
+                if unsafe_example.is_empty() {
+                    unsafe_example = format!(
+                        "{} → {} (lien hors de l'archive)",
+                        epath.display(),
+                        target.display()
+                    );
                 }
+            }
             if ty.is_symlink() {
                 symlinks.insert(joined);
             }
@@ -470,7 +484,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         }
         unpacked = unpacked.saturating_add(esize);
         if unpacked > MAX_UNPACKED {
-            push(&mut findings, Severity::Blocker, "Archive trop volumineuse une fois décompressée", format!("Plus de {} Gio décompressés.", MAX_UNPACKED >> 30));
+            push(
+                &mut findings,
+                Severity::Blocker,
+                "Archive trop volumineuse une fois décompressée",
+                format!("Plus de {} Gio décompressés.", MAX_UNPACKED >> 30),
+            );
             break;
         }
         if mode & 0o6000 != 0 {
@@ -496,15 +515,27 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 gtk_bundled = true;
             }
         }
-        let vendored = parts.iter().any(|x| matches!(x.as_str(), "node_modules" | "site-packages" | ".git" | "venv" | ".venv"));
-        if [".rs", ".go", ".py", ".js", ".mjs", ".cjs"].iter().any(|e| lower.ends_with(e)) && parts.len() <= 5 && src_raw.len() < 20_000 && !vendored {
+        let vendored = parts.iter().any(|x| {
+            matches!(
+                x.as_str(),
+                "node_modules" | "site-packages" | ".git" | "venv" | ".venv"
+            )
+        });
+        if [".rs", ".go", ".py", ".js", ".mjs", ".cjs"]
+            .iter()
+            .any(|e| lower.ends_with(e))
+            && parts.len() <= 5
+            && src_raw.len() < 20_000
+            && !vendored
+        {
             src_raw.push(parts.clone());
         }
         if lower.ends_with(".jar") && parts.len() <= 5 && jar_raw.len() < 200 {
             jar_raw.push((parts.clone(), raw.raw.clone(), esize));
         }
         match lower.as_str() {
-            "makefile" | "cmakelists.txt" | "configure" | "meson.build" | "cargo.toml" | "setup.py" | "pyproject.toml" => has_makefile = true,
+            "makefile" | "cmakelists.txt" | "configure" | "meson.build" | "cargo.toml"
+            | "setup.py" | "pyproject.toml" => has_makefile = true,
             "app.asar" => has_asar = true,
             "chrome-sandbox" => has_chrome_sandbox = true,
             _ => {}
@@ -512,7 +543,13 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         if BUILD_FILE_NAMES.contains(&lower.as_str()) && parts.len() <= 3 && esize <= 512 * 1024 {
             let mut buf = Vec::new();
             let _ = (&mut entry).take(512 * 1024).read_to_end(&mut buf);
-            build_raw.push((parts.clone(), BuildFile { name: lower.clone(), content: String::from_utf8_lossy(&buf).into_owned() }));
+            build_raw.push((
+                parts.clone(),
+                BuildFile {
+                    name: lower.clone(),
+                    content: String::from_utf8_lossy(&buf).into_owned(),
+                },
+            ));
             continue;
         }
         if lower.ends_with(".jar") {
@@ -527,7 +564,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             desktops.push((raw, parse_desktop(&s)));
             continue;
         }
-        if (lower.ends_with(".png") || lower.ends_with(".svg")) && esize > 0 && esize <= MAX_ICON_SIZE {
+        if (lower.ends_with(".png") || lower.ends_with(".svg"))
+            && esize > 0
+            && esize <= MAX_ICON_SIZE
+        {
             let is_svg = lower.ends_with(".svg");
             let mut width = 0u32;
             if !is_svg && png_reads < 3000 {
@@ -555,22 +595,54 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     }
 
     if unsafe_paths > 0 {
-        push(&mut findings, Severity::Blocker, "Chemins dangereux dans l'archive", format!("{unsafe_paths} entrée(s) tentent d'écrire hors du dossier d'extraction ou à travers un lien symbolique, par exemple : {unsafe_example}. Archive refusée par sécurité."));
+        push(
+            &mut findings,
+            Severity::Blocker,
+            "Chemins dangereux dans l'archive",
+            format!(
+                "{unsafe_paths} entrée(s) tentent d'écrire hors du dossier d'extraction ou à travers un lien symbolique, par exemple : {unsafe_example}. Archive refusée par sécurité."
+            ),
+        );
     }
     if special > 0 {
-        push(&mut findings, Severity::Blocker, "Fichiers spéciaux", format!("{special} fichier(s) de périphérique ou tube nommé : refusés par sécurité."));
+        push(
+            &mut findings,
+            Severity::Blocker,
+            "Fichiers spéciaux",
+            format!("{special} fichier(s) de périphérique ou tube nommé : refusés par sécurité."),
+        );
     }
     if size > 0 && unpacked > (1 << 30) && unpacked / size.max(1) > 1000 {
-        push(&mut findings, Severity::Blocker, "Taux de compression suspect", "Possible « bombe de décompression ».");
+        push(
+            &mut findings,
+            Severity::Blocker,
+            "Taux de compression suspect",
+            "Possible « bombe de décompression ».",
+        );
     }
     if setuid > 0 {
-        push(&mut findings, Severity::Warning, "Bits setuid/setgid", format!("{setuid} fichier(s) ont des bits spéciaux ; ils sont sans effet dans Flatpak."));
+        push(
+            &mut findings,
+            Severity::Warning,
+            "Bits setuid/setgid",
+            format!(
+                "{setuid} fichier(s) ont des bits spéciaux ; ils sont sans effet dans Flatpak."
+            ),
+        );
     }
 
     // Dossier racine
-    let top_dir = if tops.len() == 1 && root_files == 0 { tops.iter().next().cloned() } else { None };
+    let top_dir = if tops.len() == 1 && root_files == 0 {
+        tops.iter().next().cloned()
+    } else {
+        None
+    };
     let strip = |parts: &[String]| -> String {
-        if top_dir.is_some() { parts[1..].join("/") } else { parts.join("/") }
+        if top_dir.is_some() {
+            parts[1..].join("/")
+        } else {
+            parts.join("/")
+        }
     };
 
     // Bureau
@@ -605,7 +677,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             }
             if !nbase.is_empty() && nf == nbase {
                 s += 60;
-            } else if !nbase.is_empty() && (nf.contains(&nbase) || nbase.contains(&nf)) && nf.len() > 2 {
+            } else if !nbase.is_empty()
+                && (nf.contains(&nbase) || nbase.contains(&nf))
+                && nf.len() > 2
+            {
                 s += 20;
             }
             let rparts: Vec<&str> = rel.split('/').collect();
@@ -614,11 +689,31 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 s += 15;
             }
             if rparts[..rparts.len() - 1].iter().any(|p| {
-                matches!(*p, "lib" | "lib64" | "libexec" | "share" | "include" | "node_modules" | "plugins" | "site-packages" | "locales")
+                matches!(
+                    *p,
+                    "lib"
+                        | "lib64"
+                        | "libexec"
+                        | "share"
+                        | "include"
+                        | "node_modules"
+                        | "plugins"
+                        | "site-packages"
+                        | "locales"
+                )
             }) {
                 s -= 40;
             }
-            for bad in ["install", "uninstall", "update", "setup", "crash", "sandbox", "helper", "test"] {
+            for bad in [
+                "install",
+                "uninstall",
+                "update",
+                "setup",
+                "crash",
+                "sandbox",
+                "helper",
+                "test",
+            ] {
                 if nf.contains(bad) {
                     s -= 45;
                 }
@@ -629,33 +724,65 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             if r.size > (1 << 20) {
                 s += 10;
             }
-            Some(ExecCandidate { raw: r.raw, rel, kind, size: r.size, score: s })
+            Some(ExecCandidate {
+                raw: r.raw,
+                rel,
+                kind,
+                size: r.size,
+                score: s,
+            })
         })
         .collect();
     executables.sort_by(|a, b| b.score.cmp(&a.score).then(a.rel.len().cmp(&b.rel.len())));
 
     // Archive de sources ? Seuls les fichiers de build à la racine du projet comptent.
     let root_len = if top_dir.is_some() { 2 } else { 1 };
-    let mut root_build: Vec<BuildFile> = build_raw.iter().filter(|(p, _)| p.len() == root_len).map(|(_, f)| f.clone()).collect();
+    let mut root_build: Vec<BuildFile> = build_raw
+        .iter()
+        .filter(|(p, _)| p.len() == root_len)
+        .map(|(_, f)| f.clone())
+        .collect();
     // Espace de travail Cargo : les Cargo.toml des sous-dossiers (gui/, cli/…) disent si le projet est graphique.
     if root_build.iter().any(|f| f.name == "cargo.toml") {
         for (p, f) in &build_raw {
             if p.len() == root_len + 1 && f.name == "cargo.toml" {
-                root_build.push(BuildFile { name: "member:cargo.toml".into(), content: f.content.clone() });
+                root_build.push(BuildFile {
+                    name: "member:cargo.toml".into(),
+                    content: f.content.clone(),
+                });
             }
         }
     }
     // Un ELF isolé au fond d'un projet (outil de test, bibliothèque fournie) ne fait pas de l'archive une application déjà compilée.
-    let has_elf = executables.iter().any(|e| matches!(e.kind, ExecKind::Elf { .. }) && e.rel.split('/').count() <= 2 && e.score >= 10);
+    let has_elf = executables.iter().any(|e| {
+        matches!(e.kind, ExecKind::Elf { .. }) && e.rel.split('/').count() <= 2 && e.score >= 10
+    });
     let skip = if top_dir.is_some() { 1 } else { 0 };
-    let mut src_files: Vec<String> = src_raw.iter().filter(|p| p.len() > skip).map(|p| p[skip..].join("/")).collect();
+    let mut src_files: Vec<String> = src_raw
+        .iter()
+        .filter(|p| p.len() > skip)
+        .map(|p| p[skip..].join("/"))
+        .collect();
     // JAR : seuls ceux qui ont une classe principale (Main-Class) peuvent être lancés.
     {
-        let mut jars: Vec<&(Vec<String>, String, u64)> = jar_raw.iter().filter(|(p, _, _)| p.len() > skip).collect();
+        let mut jars: Vec<&(Vec<String>, String, u64)> =
+            jar_raw.iter().filter(|(p, _, _)| p.len() > skip).collect();
         jars.sort_by_key(|(p, _, _)| p.len());
         for (p, raw, size) in jars.into_iter().take(8) {
             let lowpath = p.join("/").to_lowercase();
-            if ["/lib/", "/libs/", "/dependency/", "/deps/", "sources", "javadoc", "-tests"].iter().any(|w| lowpath.contains(w)) && p.len() > skip + 1 {
+            if [
+                "/lib/",
+                "/libs/",
+                "/dependency/",
+                "/deps/",
+                "sources",
+                "javadoc",
+                "-tests",
+            ]
+            .iter()
+            .any(|w| lowpath.contains(w))
+                && p.len() > skip + 1
+            {
                 continue;
             }
             let runnable = match read_member(path, raw, 64 << 20) {
@@ -667,7 +794,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             }
         }
     }
-    let exec_names: Vec<String> = executables.iter().map(|e| e.rel.rsplit('/').next().unwrap_or("").to_lowercase()).collect();
+    let exec_names: Vec<String> = executables
+        .iter()
+        .map(|e| e.rel.rsplit('/').next().unwrap_or("").to_lowercase())
+        .collect();
     let detection = toolchains::detect(&root_build, &exec_names, has_elf, &guess_name, &src_files);
     let mut source: Option<SourceProject> = None;
     let mut unsupported_source: Option<&'static str> = None;
@@ -679,7 +809,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         Some(Detection::Unsupported(lang)) => unsupported_source = Some(lang),
         None => {}
     }
-    let main_exec = if executables.is_empty() { None } else { Some(0) };
+    let main_exec = if executables.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
 
     // Icônes
     let icon_name = desktop.as_ref().and_then(|d| d.icon.clone());
@@ -688,11 +822,17 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         .into_iter()
         .filter(|(r, _, w)| {
             let low = r.raw.to_lowercase();
-            !(low.contains("node_modules") || low.contains("/locale") || low.contains("/doc") || low.contains("/test"))
+            !(low.contains("node_modules")
+                || low.contains("/locale")
+                || low.contains("/doc")
+                || low.contains("/test"))
                 && (*w == 0 || (16..=1024).contains(w))
         })
         .map(|(r, is_svg, width)| {
-            let stem = Path::new(r.parts.last().unwrap()).file_stem().map(|s| norm(&s.to_string_lossy())).unwrap_or_default();
+            let stem = Path::new(r.parts.last().unwrap())
+                .file_stem()
+                .map(|s| norm(&s.to_string_lossy()))
+                .unwrap_or_default();
             let mut s = 0i32;
             if nicon.as_deref() == Some(stem.as_str()) {
                 s += 100;
@@ -707,7 +847,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 s -= ((width as f32 / 256.0).log2().abs() * 4.0) as i32;
             }
             s -= (r.parts.len() as i32 - 1) * 2;
-            IconCandidate { rel: strip(&r.parts), raw: r.raw, is_svg, width, score: s }
+            IconCandidate {
+                raw: r.raw,
+                is_svg,
+                score: s,
+            }
         })
         .filter(|i| i.score > 0)
         .collect();
@@ -722,7 +866,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         .take(6)
         .map(|(d, _)| {
             let p: Vec<String> = d.split('/').map(String::from).collect();
-            if top_dir.is_some() && !p.is_empty() { p[1..].join("/") } else { d }
+            if top_dir.is_some() && !p.is_empty() {
+                p[1..].join("/")
+            } else {
+                d
+            }
         })
         .collect();
 
@@ -749,23 +897,68 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     match kind {
         AppKind::Source => match (&source, unsupported_source) {
             (Some(p), _) => {
-                let title = if p.system.compiles() { format!("Code source à compiler : {}", p.system.label()) } else { format!("Application {}", p.system.label()) };
+                let title = if p.system.compiles() {
+                    format!("Code source à compiler : {}", p.system.label())
+                } else {
+                    format!("Application {}", p.system.label())
+                };
                 push(&mut findings, Severity::Info, &title, p.system.intro());
                 if let Some(why) = &p.blocker {
-                    push(&mut findings, Severity::Blocker, "Aucun programme à compiler", why.clone());
+                    push(
+                        &mut findings,
+                        Severity::Blocker,
+                        "Aucun programme à compiler",
+                        why.clone(),
+                    );
                 } else if !p.bin_certain {
-                    push(&mut findings, Severity::Warning, "Nom du binaire à confirmer", format!("Le programme installé s'appellerait « {} », mais ce nom est deviné. Vous devrez le confirmer (ou le corriger) avant de lancer la compilation.", p.bin_name));
+                    push(
+                        &mut findings,
+                        Severity::Warning,
+                        "Nom du binaire à confirmer",
+                        format!(
+                            "Le programme installé s'appellerait « {} », mais ce nom est deviné. Vous devrez le confirmer (ou le corriger) avant de lancer la compilation.",
+                            p.bin_name
+                        ),
+                    );
                 }
                 for n in &p.notes {
                     push(&mut findings, Severity::Info, "Compilation", n.clone());
                 }
             }
-            (None, Some(lang)) => push(&mut findings, Severity::Blocker, &format!("Projet {lang} non pris en charge"), format!("Cette archive contient un projet {lang} ; seuls {} sont pris en charge pour l'instant.", toolchains::SUPPORTED_LANGS)),
-            (None, None) => push(&mut findings, Severity::Blocker, "Archive de sources", "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go, Python, Node.js, JAR)."),
+            (None, Some(lang)) => push(
+                &mut findings,
+                Severity::Blocker,
+                &format!("Projet {lang} non pris en charge"),
+                format!(
+                    "Cette archive contient un projet {lang} ; seuls {} sont pris en charge pour l'instant.",
+                    toolchains::SUPPORTED_LANGS
+                ),
+            ),
+            (None, None) => push(
+                &mut findings,
+                Severity::Blocker,
+                "Archive de sources",
+                "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go, Python, Node.js, JAR).",
+            ),
         },
-        AppKind::AppImage => push(&mut findings, Severity::Blocker, "AppImage détecté", "L'archive contient un AppImage. Ce format est déjà autonome ; il ne peut pas être converti directement."),
-        AppKind::Java => push(&mut findings, Severity::Blocker, "Application Java", "Les fichiers .jar de cette archive n'ont pas de classe principale (Main-Class) : ce sont des bibliothèques, pas un programme qu'on peut lancer."),
-        AppKind::Unknown => push(&mut findings, Severity::Blocker, "Aucun exécutable trouvé", "Impossible de repérer un programme exécutable dans cette archive."),
+        AppKind::AppImage => push(
+            &mut findings,
+            Severity::Blocker,
+            "AppImage détecté",
+            "L'archive contient un AppImage. Ce format est déjà autonome ; il ne peut pas être converti directement.",
+        ),
+        AppKind::Java => push(
+            &mut findings,
+            Severity::Blocker,
+            "Application Java",
+            "Les fichiers .jar de cette archive n'ont pas de classe principale (Main-Class) : ce sont des bibliothèques, pas un programme qu'on peut lancer.",
+        ),
+        AppKind::Unknown => push(
+            &mut findings,
+            Severity::Blocker,
+            "Aucun exécutable trouvé",
+            "Impossible de repérer un programme exécutable dans cette archive.",
+        ),
         _ => {}
     }
 
@@ -775,8 +968,29 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         && let Some(m) = main_exec.and_then(|i| executables.get(i))
     {
         let f = m.rel.rsplit('/').next().unwrap_or("").to_lowercase();
-        if ["install", "setup", "uninstall", "configure", "bootstrap", "autogen", "build", "update", "make"].iter().any(|w| f.contains(w)) {
-            push(&mut findings, Severity::Blocker, "Archive non prévue pour être convertie", format!("Le seul programme trouvé est « {} », qui ressemble à un script d'installation ou de compilation, pas à une application.", m.rel));
+        if [
+            "install",
+            "setup",
+            "uninstall",
+            "configure",
+            "bootstrap",
+            "autogen",
+            "build",
+            "update",
+            "make",
+        ]
+        .iter()
+        .any(|w| f.contains(w))
+        {
+            push(
+                &mut findings,
+                Severity::Blocker,
+                "Archive non prévue pour être convertie",
+                format!(
+                    "Le seul programme trouvé est « {} », qui ressemble à un script d'installation ou de compilation, pas à une application.",
+                    m.rel
+                ),
+            );
         }
     }
 
@@ -785,41 +999,98 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     let mut dlopen_gui = false;
     let mut missing_libs: Vec<String> = Vec::new();
     if let Some(m) = main_exec.map(|i| executables[i].clone()) {
-        push(&mut findings, Severity::Info, "Exécutable principal", format!("{} ({})", m.rel, kind.label()));
+        push(
+            &mut findings,
+            Severity::Info,
+            "Exécutable principal",
+            format!("{} ({})", m.rel, kind.label()),
+        );
         if executables.len() > 1 {
-            let others = executables.iter().skip(1).take(3).map(|e| e.rel.clone()).collect::<Vec<_>>().join(", ");
-            push(&mut findings, Severity::Info, &format!("{} autres exécutables détectés", executables.len() - 1), format!("Au besoin, choisissez-en un autre en mode avancé (ex. : {others})."));
+            let others = executables
+                .iter()
+                .skip(1)
+                .take(3)
+                .map(|e| e.rel.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            push(
+                &mut findings,
+                Severity::Info,
+                &format!("{} autres exécutables détectés", executables.len() - 1),
+                format!("Au besoin, choisissez-en un autre en mode avancé (ex. : {others})."),
+            );
         }
         match &m.kind {
             ExecKind::Elf { arch, bits } => {
                 if !arch.matches_host() {
-                    push(&mut findings, Severity::Blocker, "Architecture incompatible", format!("Le binaire est compilé pour {} mais cette machine est en {}.", arch.label(), std::env::consts::ARCH));
+                    push(
+                        &mut findings,
+                        Severity::Blocker,
+                        "Architecture incompatible",
+                        format!(
+                            "Le binaire est compilé pour {} mais cette machine est en {}.",
+                            arch.label(),
+                            std::env::consts::ARCH
+                        ),
+                    );
                 }
                 if *bits == 32 {
-                    push(&mut findings, Severity::Blocker, "Binaire 32 bits", "Les binaires 32 bits nécessitent l'extension de compatibilité i386 ; non prise en charge.");
+                    push(
+                        &mut findings,
+                        Severity::Blocker,
+                        "Binaire 32 bits",
+                        "Les binaires 32 bits nécessitent l'extension de compatibilité i386 ; non prise en charge.",
+                    );
                 }
                 if m.size <= MAX_ELF_PARSE {
                     match read_member(path, &m.raw, MAX_ELF_PARSE) {
                         Ok(data) => {
                             // Bibliothèques graphiques chargées à l'exécution (dlopen), invisibles dans les dépendances ELF
                             // (winit, SDL, GLFW… sous Wayland ou X11).
-                            dlopen_gui = [&b"libwayland-client.so"[..], b"libxkbcommon.so", b"libX11.so", b"libxcb.so", b"libvulkan.so", b"libEGL.so"]
-                                .iter()
-                                .any(|pat| data.windows(pat.len()).any(|w| w == *pat));
+                            dlopen_gui = [
+                                &b"libwayland-client.so"[..],
+                                b"libxkbcommon.so",
+                                b"libX11.so",
+                                b"libxcb.so",
+                                b"libvulkan.so",
+                                b"libEGL.so",
+                            ]
+                            .iter()
+                            .any(|pat| data.windows(pat.len()).any(|w| w == *pat));
                             if let Ok(elf) = goblin::elf::Elf::parse(&data) {
                                 needed_libs = elf.libraries.iter().map(|s| s.to_string()).collect();
                             } else {
-                                push(&mut findings, Severity::Warning, "Dépendances non analysées", "L'en-tête ELF n'a pas pu être lu entièrement.");
+                                push(
+                                    &mut findings,
+                                    Severity::Warning,
+                                    "Dépendances non analysées",
+                                    "L'en-tête ELF n'a pas pu être lu entièrement.",
+                                );
                             }
                         }
-                        Err(e) => push(&mut findings, Severity::Warning, "Dépendances non analysées", e.to_string()),
+                        Err(e) => push(
+                            &mut findings,
+                            Severity::Warning,
+                            "Dépendances non analysées",
+                            e.to_string(),
+                        ),
                     }
                 }
             }
             ExecKind::Script { interpreter } => {
-                let base = Path::new(interpreter).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let base = Path::new(interpreter)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if !matches!(base.as_str(), "sh" | "bash" | "dash") {
-                    push(&mut findings, Severity::Warning, "Interpréteur à vérifier", format!("Le script utilise « {interpreter} ». Cet interpréteur doit exister dans le runtime ou être embarqué dans l'archive."));
+                    push(
+                        &mut findings,
+                        Severity::Warning,
+                        "Interpréteur à vérifier",
+                        format!(
+                            "Le script utilise « {interpreter} ». Cet interpréteur doit exister dans le runtime ou être embarqué dans l'archive."
+                        ),
+                    );
                 }
             }
         }
@@ -836,7 +1107,8 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             }
             continue;
         }
-        if lib.starts_with("libgtk-") || lib.starts_with("libgdk-") || lib.starts_with("libadwaita") {
+        if lib.starts_with("libgtk-") || lib.starts_with("libgdk-") || lib.starts_with("libadwaita")
+        {
             hints.gtk = true;
             hints.gui = true;
         } else if lib.starts_with("libQt5") || lib.starts_with("libQt6") {
@@ -846,26 +1118,59 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             missing_libs.push(lib.clone());
         }
     }
-    if dlopen_gui || lib_names.iter().any(|l| is_gui_lib(l)) || hints.electron || hints.qt || hints.gtk {
+    if dlopen_gui
+        || lib_names.iter().any(|l| is_gui_lib(l))
+        || hints.electron
+        || hints.qt
+        || hints.gtk
+    {
         hints.gui = true;
     }
     if hints.electron {
         hints.network_likely = true;
     }
     if !missing_libs.is_empty() {
-        push(&mut findings, Severity::Warning, "Bibliothèques possiblement manquantes", format!("Non embarquées et absentes du runtime standard (analyse heuristique) : {}.", missing_libs.join(", ")));
+        push(
+            &mut findings,
+            Severity::Warning,
+            "Bibliothèques possiblement manquantes",
+            format!(
+                "Non embarquées et absentes du runtime standard (analyse heuristique) : {}.",
+                missing_libs.join(", ")
+            ),
+        );
     }
     if hints.electron {
-        push(&mut findings, Severity::Warning, "Application Electron détectée", "Le bac à sable Chromium ne fonctionne pas sans composant supplémentaire ; l'application sera lancée avec --no-sandbox (le bac à sable Flatpak reste actif).");
+        push(
+            &mut findings,
+            Severity::Warning,
+            "Application Electron détectée",
+            "Le bac à sable Chromium ne fonctionne pas sans composant supplémentaire ; l'application sera lancée avec --no-sandbox (le bac à sable Flatpak reste actif).",
+        );
     }
     if matches!(kind, AppKind::Native | AppKind::Script) {
         if hints.gui {
-            push(&mut findings, Severity::Info, "Application graphique", "Accès à l'affichage et à l'accélération graphique proposés par défaut.");
+            push(
+                &mut findings,
+                Severity::Info,
+                "Application graphique",
+                "Accès à l'affichage et à l'accélération graphique proposés par défaut.",
+            );
         } else {
-            push(&mut findings, Severity::Info, "Application en ligne de commande probable", "Aucune bibliothèque graphique détectée : l'entrée de menu s'ouvrira dans un terminal.");
+            push(
+                &mut findings,
+                Severity::Info,
+                "Application en ligne de commande probable",
+                "Aucune bibliothèque graphique détectée : l'entrée de menu s'ouvrira dans un terminal.",
+            );
         }
     }
-    push(&mut findings, Severity::Info, "Contenu", format!("{count} fichiers, {} Mio décompressés.", unpacked >> 20));
+    push(
+        &mut findings,
+        Severity::Info,
+        "Contenu",
+        format!("{count} fichiers, {} Mio décompressés.", unpacked >> 20),
+    );
     // Tri : blocages d'abord
     findings.sort_by_key(|b| std::cmp::Reverse(b.severity));
 
@@ -875,7 +1180,6 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         sha256,
         size,
         unpacked_size: unpacked,
-        file_count: count,
         top_dir,
         kind,
         executables,
@@ -883,8 +1187,6 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         desktop,
         icons,
         lib_dirs,
-        needed_libs,
-        missing_libs,
         hints,
         guessed_name: name,
         guessed_version: guess_version,
@@ -895,16 +1197,25 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
 
 fn clean_name(n: &str) -> String {
     let t = n.trim();
-    if t.is_empty() { "Application".into() } else { t.to_string() }
+    if t.is_empty() {
+        "Application".into()
+    } else {
+        t.to_string()
+    }
 }
 
-fn empty_info(path: &Path, size: u64, findings: Vec<Finding>, name: String, version: String) -> ArchiveInfo {
+fn empty_info(
+    path: &Path,
+    size: u64,
+    findings: Vec<Finding>,
+    name: String,
+    version: String,
+) -> ArchiveInfo {
     ArchiveInfo {
         path: path.to_path_buf(),
         sha256: String::new(),
         size,
         unpacked_size: 0,
-        file_count: 0,
         top_dir: None,
         kind: AppKind::Unknown,
         executables: vec![],
@@ -912,8 +1223,6 @@ fn empty_info(path: &Path, size: u64, findings: Vec<Finding>, name: String, vers
         desktop: None,
         icons: vec![],
         lib_dirs: vec![],
-        needed_libs: vec![],
-        missing_libs: vec![],
         hints: Hints::default(),
         guessed_name: name,
         guessed_version: version,
@@ -925,7 +1234,11 @@ fn empty_info(path: &Path, size: u64, findings: Vec<Finding>, name: String, vers
 fn sniff_exec(head: &[u8]) -> Option<ExecKind> {
     if head.len() >= 20 && &head[..4] == b"\x7fELF" {
         let bits = if head[4] == 2 { 64 } else { 32 };
-        let machine = if head[5] == 2 { u16::from_be_bytes([head[18], head[19]]) } else { u16::from_le_bytes([head[18], head[19]]) };
+        let machine = if head[5] == 2 {
+            u16::from_be_bytes([head[18], head[19]])
+        } else {
+            u16::from_le_bytes([head[18], head[19]])
+        };
         let arch = match machine {
             62 => Arch::X86_64,
             183 => Arch::Aarch64,
@@ -939,8 +1252,14 @@ fn sniff_exec(head: &[u8]) -> Option<ExecKind> {
         let line = line.lines().next().unwrap_or("").trim();
         let mut it = line.split_whitespace();
         let first = it.next()?;
-        let interp = if first.ends_with("/env") { it.next().unwrap_or(first) } else { first };
-        return Some(ExecKind::Script { interpreter: interp.to_string() });
+        let interp = if first.ends_with("/env") {
+            it.next().unwrap_or(first)
+        } else {
+            first
+        };
+        return Some(ExecKind::Script {
+            interpreter: interp.to_string(),
+        });
     }
     None
 }
@@ -948,11 +1267,19 @@ fn sniff_exec(head: &[u8]) -> Option<ExecKind> {
 /// Lit un membre précis de l'archive en mémoire (borné).
 /// Vrai si le JAR déclare un `Main-Class` dans META-INF/MANIFEST.MF ; None si le fichier n'a pas pu être lu.
 fn jar_has_main_class(data: &[u8]) -> Option<bool> {
-    let u16le = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
-    let u32le = |o: usize| data.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    let u16le = |o: usize| {
+        data.get(o..o + 2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+    };
+    let u32le = |o: usize| {
+        data.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+    };
     // Fin du répertoire central : signature PK\x05\x06 dans les 64 Kio finaux.
     let tail_start = data.len().saturating_sub(65_557);
-    let eocd = (tail_start..data.len().checked_sub(22)? + 1).rev().find(|&i| data[i..].starts_with(&[0x50, 0x4b, 5, 6]))?;
+    let eocd = (tail_start..data.len().checked_sub(22)? + 1)
+        .rev()
+        .find(|&i| data[i..].starts_with(&[0x50, 0x4b, 5, 6]))?;
     let entries = u16le(eocd + 10)?;
     let mut off = u32le(eocd + 16)?;
     for _ in 0..entries {
@@ -973,11 +1300,19 @@ fn jar_has_main_class(data: &[u8]) -> Option<bool> {
             match method {
                 0 => text = String::from_utf8_lossy(comp).into_owned(),
                 8 => {
-                    flate2::read::DeflateDecoder::new(comp).take(1 << 20).read_to_string(&mut text).ok()?;
+                    flate2::read::DeflateDecoder::new(comp)
+                        .take(1 << 20)
+                        .read_to_string(&mut text)
+                        .ok()?;
                 }
                 _ => return None,
             }
-            return Some(text.lines().any(|l| l.trim_start().to_ascii_lowercase().starts_with("main-class:") && l.split(':').nth(1).is_some_and(|v| !v.trim().is_empty())));
+            return Some(text.lines().any(|l| {
+                l.trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("main-class:")
+                    && l.split(':').nth(1).is_some_and(|v| !v.trim().is_empty())
+            }));
         }
         off += 46 + nlen + elen + clen;
     }
@@ -985,10 +1320,16 @@ fn jar_has_main_class(data: &[u8]) -> Option<bool> {
 }
 
 pub fn read_member(archive: &Path, raw: &str, max: u64) -> Result<Vec<u8>> {
-    let mut ar = tar::Archive::new(open_decoder(archive)?.ok_or_else(|| anyhow!("format d'archive non reconnu"))?);
+    let mut ar = tar::Archive::new(
+        open_decoder(archive)?.ok_or_else(|| anyhow!("format d'archive non reconnu"))?,
+    );
     for e in ar.entries()? {
         let mut e = e?;
-        let p = e.path()?.to_string_lossy().trim_start_matches("./").to_string();
+        let p = e
+            .path()?
+            .to_string_lossy()
+            .trim_start_matches("./")
+            .to_string();
         if p == raw && e.header().entry_type().is_file() {
             let mut v = Vec::new();
             (&mut e).take(max).read_to_end(&mut v)?;
@@ -999,23 +1340,105 @@ pub fn read_member(archive: &Path, raw: &str, max: u64) -> Result<Vec<u8>> {
 }
 
 fn is_gui_lib(l: &str) -> bool {
-    ["libX11", "libxcb", "libwayland-client", "libGL", "libEGL", "libgtk", "libQt5Gui", "libQt6Gui", "libSDL2", "libglfw", "libvulkan"]
-        .iter()
-        .any(|p| l.starts_with(p))
+    [
+        "libX11",
+        "libxcb",
+        "libwayland-client",
+        "libGL",
+        "libEGL",
+        "libgtk",
+        "libQt5Gui",
+        "libQt6Gui",
+        "libSDL2",
+        "libglfw",
+        "libvulkan",
+    ]
+    .iter()
+    .any(|p| l.starts_with(p))
 }
 
 /// Bibliothèques présentes dans org.freedesktop.Platform (liste heuristique).
 fn is_runtime_lib(l: &str) -> bool {
     const P: &[&str] = &[
-        "libc.so", "libm.so", "libdl.so", "libpthread.so", "librt.so", "libutil.so", "libresolv.so", "libnsl.so",
-        "libgcc_s", "libstdc++", "ld-linux", "libz.so", "libbz2", "liblzma", "libX11", "libXext", "libXrender", "libXi.so",
-        "libXcursor", "libXrandr", "libXfixes", "libXcomposite", "libXdamage", "libXtst", "libXss", "libXinerama", "libxcb",
-        "libGL", "libEGL", "libOpenGL", "libgbm", "libdrm", "libasound", "libpulse", "libfontconfig", "libfreetype",
-        "libharfbuzz", "libglib-2.0", "libgobject-2.0", "libgio-2.0", "libgmodule-2.0", "libgthread-2.0", "libdbus-1",
-        "libwayland-", "libxkbcommon", "libssl", "libcrypto", "libcups", "libnss3", "libnspr4", "libnssutil3", "libsmime3",
-        "libexpat", "libpng16", "libjpeg", "libuuid", "libffi", "libpcre2", "libudev", "libsystemd", "libatomic", "libcurl",
-        "libvulkan", "libxshmfence", "libxkbfile", "libcairo", "libpango", "libpangocairo", "libpangoft2", "libgdk_pixbuf",
-        "libatk-1.0", "libatk-bridge", "libatspi", "libepoxy", "libsndfile", "libogg", "libvorbis", "libopus", "libSDL2",
+        "libc.so",
+        "libm.so",
+        "libdl.so",
+        "libpthread.so",
+        "librt.so",
+        "libutil.so",
+        "libresolv.so",
+        "libnsl.so",
+        "libgcc_s",
+        "libstdc++",
+        "ld-linux",
+        "libz.so",
+        "libbz2",
+        "liblzma",
+        "libX11",
+        "libXext",
+        "libXrender",
+        "libXi.so",
+        "libXcursor",
+        "libXrandr",
+        "libXfixes",
+        "libXcomposite",
+        "libXdamage",
+        "libXtst",
+        "libXss",
+        "libXinerama",
+        "libxcb",
+        "libGL",
+        "libEGL",
+        "libOpenGL",
+        "libgbm",
+        "libdrm",
+        "libasound",
+        "libpulse",
+        "libfontconfig",
+        "libfreetype",
+        "libharfbuzz",
+        "libglib-2.0",
+        "libgobject-2.0",
+        "libgio-2.0",
+        "libgmodule-2.0",
+        "libgthread-2.0",
+        "libdbus-1",
+        "libwayland-",
+        "libxkbcommon",
+        "libssl",
+        "libcrypto",
+        "libcups",
+        "libnss3",
+        "libnspr4",
+        "libnssutil3",
+        "libsmime3",
+        "libexpat",
+        "libpng16",
+        "libjpeg",
+        "libuuid",
+        "libffi",
+        "libpcre2",
+        "libudev",
+        "libsystemd",
+        "libatomic",
+        "libcurl",
+        "libvulkan",
+        "libxshmfence",
+        "libxkbfile",
+        "libcairo",
+        "libpango",
+        "libpangocairo",
+        "libpangoft2",
+        "libgdk_pixbuf",
+        "libatk-1.0",
+        "libatk-bridge",
+        "libatspi",
+        "libepoxy",
+        "libsndfile",
+        "libogg",
+        "libvorbis",
+        "libopus",
+        "libSDL2",
     ];
     P.iter().any(|p| l.starts_with(p))
 }
@@ -1036,7 +1459,11 @@ mod tests {
         v
     }
 
-    fn build(dir: &Path, name: &str, f: impl FnOnce(&mut tar::Builder<GzEncoder<File>>)) -> PathBuf {
+    fn build(
+        dir: &Path,
+        name: &str,
+        f: impl FnOnce(&mut tar::Builder<GzEncoder<File>>),
+    ) -> PathBuf {
         let p = dir.join(name);
         let enc = GzEncoder::new(File::create(&p).unwrap(), Compression::fast());
         let mut b = tar::Builder::new(enc);
@@ -1054,14 +1481,23 @@ mod tests {
     }
 
     fn host_machine() -> u16 {
-        if std::env::consts::ARCH == "aarch64" { 183 } else { 62 }
+        if std::env::consts::ARCH == "aarch64" {
+            183
+        } else {
+            62
+        }
     }
 
     #[test]
     fn simple_native_app() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "monappli-1.2.3-linux-x64.tar.gz", |b| {
-            add(b, "monappli-1.2.3/monappli", &elf_header(host_machine()), 0o755);
+            add(
+                b,
+                "monappli-1.2.3/monappli",
+                &elf_header(host_machine()),
+                0o755,
+            );
             add(b, "monappli-1.2.3/README.txt", b"hello", 0o644);
             add(b, "monappli-1.2.3/monappli.desktop", b"[Desktop Entry]\nName=Mon Appli\nExec=monappli %U\nIcon=monappli\nCategories=Utility;\n", 0o644);
         });
@@ -1071,7 +1507,10 @@ mod tests {
         assert_eq!(i.main().unwrap().rel, "monappli");
         assert_eq!(i.guessed_version, "1.2.3");
         assert_eq!(i.kind, AppKind::Native);
-        assert_eq!(i.desktop.as_ref().unwrap().name.as_deref(), Some("Mon Appli"));
+        assert_eq!(
+            i.desktop.as_ref().unwrap().name.as_deref(),
+            Some("Mon Appli")
+        );
     }
 
     #[test]
@@ -1121,17 +1560,30 @@ mod tests {
         assert!(i.is_compatible());
         assert!(i.executables.is_empty());
         let s = i.source.unwrap();
-        assert_eq!((s.system, s.bin_name.as_str(), s.bin_certain), (crate::toolchains::BuildSystem::Make, "hello", true));
+        assert_eq!(
+            (s.system, s.bin_name.as_str(), s.bin_certain),
+            (crate::toolchains::BuildSystem::Make, "hello", true)
+        );
     }
 
     #[test]
     fn rust_project_is_a_source_build() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "outil-1.2.0.tar.gz", |b| {
-            add(b, "outil-1.2.0/Cargo.toml", b"[package]\nname = \"outil\"\nversion = \"1.2.0\"\n", 0o644);
+            add(
+                b,
+                "outil-1.2.0/Cargo.toml",
+                b"[package]\nname = \"outil\"\nversion = \"1.2.0\"\n",
+                0o644,
+            );
             add(b, "outil-1.2.0/src/main.rs", b"fn main(){}", 0o644);
             // un Cargo.toml de sous-dossier ne compte pas
-            add(b, "outil-1.2.0/vendor/x/Cargo.toml", b"[package]\nname = \"x\"\n", 0o644);
+            add(
+                b,
+                "outil-1.2.0/vendor/x/Cargo.toml",
+                b"[package]\nname = \"x\"\n",
+                0o644,
+            );
         });
         let i = analyze(&p).unwrap();
         assert!(i.is_compatible());
@@ -1140,9 +1592,15 @@ mod tests {
         assert_eq!(i.strip_components(), 1);
         let cfg = crate::manifest::BuildConfig::from_info(&i);
         let m = cfg.manifest(&i, "icon.png", "256x256");
-        assert_eq!(m["sdk-extensions"][0], "org.freedesktop.Sdk.Extension.rust-stable");
+        assert_eq!(
+            m["sdk-extensions"][0],
+            "org.freedesktop.Sdk.Extension.rust-stable"
+        );
         assert_eq!(m["command"], "outil");
-        assert_eq!(m["modules"][0]["build-options"]["build-args"][0], "--share=network");
+        assert_eq!(
+            m["modules"][0]["build-options"]["build-args"][0],
+            "--share=network"
+        );
         assert_eq!(m["modules"].as_array().unwrap().len(), 2);
     }
 
@@ -1157,26 +1615,47 @@ mod tests {
             h.set_mode(0o666);
             h.set_cksum();
             b.append(&h, &[][..]).unwrap();
-            add(b, "outil-1.2.0/Cargo.toml", b"[package]\nname = \"outil\"\nversion = \"1.2.0\"\n", 0o644);
+            add(
+                b,
+                "outil-1.2.0/Cargo.toml",
+                b"[package]\nname = \"outil\"\nversion = \"1.2.0\"\n",
+                0o644,
+            );
             add(b, "outil-1.2.0/src/main.rs", b"fn main(){}", 0o644);
         });
         let i = analyze(&p).unwrap();
         assert_eq!(i.strip_components(), 1);
-        assert!(i.source.is_some(), "l'archive doit être reconnue comme un projet Rust");
+        assert!(
+            i.source.is_some(),
+            "l'archive doit être reconnue comme un projet Rust"
+        );
     }
 
     #[test]
     fn unsupported_or_unknown_sources_are_blocked() {
         let d = tempfile::tempdir().unwrap();
-        let p = build(d.path(), "js.tar.gz", |b| add(b, "proj/package.json", b"{}", 0o644));
+        let p = build(d.path(), "js.tar.gz", |b| {
+            add(b, "proj/package.json", b"{}", 0o644)
+        });
         assert!(!analyze(&p).unwrap().is_compatible());
-        let p = build(d.path(), "rb.tar.gz", |b| add(b, "proj/Gemfile", b"source 'x'", 0o644));
+        let p = build(d.path(), "rb.tar.gz", |b| {
+            add(b, "proj/Gemfile", b"source 'x'", 0o644)
+        });
         let i = analyze(&p).unwrap();
         assert!(!i.is_compatible());
         assert!(i.blockers().any(|f| f.title.contains("Ruby")));
-        let p = build(d.path(), "mvn.tar.gz", |b| add(b, "proj/pom.xml", b"<project/>", 0o644));
-        assert!(analyze(&p).unwrap().blockers().any(|f| f.title.contains("Maven")));
-        let p = build(d.path(), "c.tar.gz", |b| add(b, "proj/main.c", b"int main(){}", 0o644));
+        let p = build(d.path(), "mvn.tar.gz", |b| {
+            add(b, "proj/pom.xml", b"<project/>", 0o644)
+        });
+        assert!(
+            analyze(&p)
+                .unwrap()
+                .blockers()
+                .any(|f| f.title.contains("Maven"))
+        );
+        let p = build(d.path(), "c.tar.gz", |b| {
+            add(b, "proj/main.c", b"int main(){}", 0o644)
+        });
         assert!(!analyze(&p).unwrap().is_compatible());
     }
 
@@ -1196,7 +1675,9 @@ mod tests {
     fn wrong_arch_is_blocked() {
         let d = tempfile::tempdir().unwrap();
         let other = if host_machine() == 62 { 183 } else { 62 };
-        let p = build(d.path(), "arm.tar.gz", |b| add(b, "app/run", &elf_header(other), 0o755));
+        let p = build(d.path(), "arm.tar.gz", |b| {
+            add(b, "app/run", &elf_header(other), 0o755)
+        });
         let i = analyze(&p).unwrap();
         assert!(i.blockers().any(|f| f.title.contains("Architecture")));
     }
@@ -1204,7 +1685,9 @@ mod tests {
     #[test]
     fn script_app_is_detected() {
         let d = tempfile::tempdir().unwrap();
-        let p = build(d.path(), "tool.tar.gz", |b| add(b, "tool/tool", b"#!/usr/bin/env bash\necho hi\n", 0o755));
+        let p = build(d.path(), "tool.tar.gz", |b| {
+            add(b, "tool/tool", b"#!/usr/bin/env bash\necho hi\n", 0o755)
+        });
         let i = analyze(&p).unwrap();
         assert_eq!(i.kind, AppKind::Script);
         assert!(i.is_compatible());
@@ -1270,15 +1753,26 @@ mod tests {
 
     #[test]
     fn name_version_guess() {
-        assert_eq!(guess_name_version("Foo-Bar_2.4.1_linux_x64.tar.gz"), ("Foo Bar".into(), "2.4.1".into()));
-        assert_eq!(guess_name_version("tool.tgz"), ("tool".into(), "1.0".into()));
+        assert_eq!(
+            guess_name_version("Foo-Bar_2.4.1_linux_x64.tar.gz"),
+            ("Foo Bar".into(), "2.4.1".into())
+        );
+        assert_eq!(
+            guess_name_version("tool.tgz"),
+            ("tool".into(), "1.0".into())
+        );
     }
 
     #[test]
     fn rust_library_archive_is_refused() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "lib.tar.gz", |b| {
-            add(b, "mylib/Cargo.toml", b"[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n", 0o644);
+            add(
+                b,
+                "mylib/Cargo.toml",
+                b"[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n",
+                0o644,
+            );
             add(b, "mylib/src/lib.rs", b"pub fn f() {}", 0o644);
         });
         let i = analyze(&p).unwrap();
@@ -1313,7 +1807,9 @@ mod tests {
         z.extend(name);
         z.extend(data);
         let cd = z.len();
-        z.extend([0x50, 0x4b, 1, 2, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        z.extend([
+            0x50, 0x4b, 1, 2, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
         z.extend(le32(data.len()));
         z.extend(le32(data.len()));
         z.extend(le16(name.len()));
@@ -1330,8 +1826,14 @@ mod tests {
 
     #[test]
     fn jar_main_class_detection() {
-        assert_eq!(jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\nMain-Class: app.Main\n")), Some(true));
-        assert_eq!(jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\n")), Some(false));
+        assert_eq!(
+            jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\nMain-Class: app.Main\n")),
+            Some(true)
+        );
+        assert_eq!(
+            jar_has_main_class(&tiny_jar("Manifest-Version: 1.0\n")),
+            Some(false)
+        );
         assert_eq!(jar_has_main_class(b"pas un zip"), None);
     }
 
@@ -1339,8 +1841,18 @@ mod tests {
     fn java_jar_with_main_class_is_supported() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "monjeu-1.0.tar.gz", |b| {
-            add(b, "monjeu-1.0/monjeu.jar", &tiny_jar("Main-Class: a.B\n"), 0o644);
-            add(b, "monjeu-1.0/lib/dep.jar", &tiny_jar("Manifest-Version: 1.0\n"), 0o644);
+            add(
+                b,
+                "monjeu-1.0/monjeu.jar",
+                &tiny_jar("Main-Class: a.B\n"),
+                0o644,
+            );
+            add(
+                b,
+                "monjeu-1.0/lib/dep.jar",
+                &tiny_jar("Manifest-Version: 1.0\n"),
+                0o644,
+            );
         });
         let i = analyze(&p).unwrap();
         assert!(i.is_compatible(), "{:?}", i.findings);
@@ -1351,14 +1863,22 @@ mod tests {
         let launcher = cfg.launcher_script().unwrap();
         assert!(launcher.contains("/app/jre/bin/java -jar '/app/opt/monjeu/monjeu.jar'"));
         let m = cfg.manifest(&i, "icon.png", "256x256");
-        assert_eq!(m["sdk-extensions"][0], "org.freedesktop.Sdk.Extension.openjdk25");
+        assert_eq!(
+            m["sdk-extensions"][0],
+            "org.freedesktop.Sdk.Extension.openjdk25"
+        );
     }
 
     #[test]
     fn java_library_jar_is_blocked() {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "lib.tar.gz", |b| {
-            add(b, "lib/lib.jar", &tiny_jar("Manifest-Version: 1.0\n"), 0o644);
+            add(
+                b,
+                "lib/lib.jar",
+                &tiny_jar("Manifest-Version: 1.0\n"),
+                0o644,
+            );
         });
         let i = analyze(&p).unwrap();
         assert!(!i.is_compatible());
@@ -1369,19 +1889,34 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = build(d.path(), "monoutil-2.0.tar.gz", |b| {
             add(b, "monoutil-2.0/pyproject.toml", b"[build-system]\nrequires=[\"setuptools\"]\n[project]\nname=\"monoutil\"\ndependencies=[\"requests\"]\n[project.scripts]\nmonoutil-cli = \"monoutil.cli:main\"\n", 0o644);
-            add(b, "monoutil-2.0/monoutil/cli.py", b"def main(): pass", 0o644);
+            add(
+                b,
+                "monoutil-2.0/monoutil/cli.py",
+                b"def main(): pass",
+                0o644,
+            );
         });
         let i = analyze(&p).unwrap();
         assert!(i.is_compatible(), "{:?}", i.findings);
         let s = i.source.as_ref().unwrap();
-        assert_eq!(s.entry, crate::toolchains::Entry::Console("monoutil-cli".into()));
+        assert_eq!(
+            s.entry,
+            crate::toolchains::Entry::Console("monoutil-cli".into())
+        );
         assert!(s.installable && s.network);
         let cfg = crate::manifest::BuildConfig::from_info(&i);
         assert!(cfg.perms.network);
         let m = cfg.manifest(&i, "icon.png", "256x256");
         let cmds = m["modules"][0]["build-commands"].to_string();
-        assert!(cmds.contains("pip3 install --prefix=/app/opt/monoutil"), "{cmds}");
-        assert!(cfg.launcher_script().unwrap().contains("/app/opt/monoutil/bin/monoutil-cli"));
+        assert!(
+            cmds.contains("pip3 install --prefix=/app/opt/monoutil"),
+            "{cmds}"
+        );
+        assert!(
+            cfg.launcher_script()
+                .unwrap()
+                .contains("/app/opt/monoutil/bin/monoutil-cli")
+        );
         assert!(m.get("sdk-extensions").is_none());
     }
 
@@ -1396,7 +1931,15 @@ mod tests {
         let i = analyze(&p).unwrap();
         assert!(i.is_compatible(), "{:?}", i.findings);
         let s = i.source.as_ref().unwrap();
-        assert_eq!((s.system, s.entry.clone(), s.requirements, s.gtk), (crate::toolchains::BuildSystem::Python, crate::toolchains::Entry::File("main.py".into()), true, true));
+        assert_eq!(
+            (s.system, s.entry.clone(), s.requirements, s.gtk),
+            (
+                crate::toolchains::BuildSystem::Python,
+                crate::toolchains::Entry::File("main.py".into()),
+                true,
+                true
+            )
+        );
         let cfg = crate::manifest::BuildConfig::from_info(&i);
         assert_eq!(cfg.runtime, crate::manifest::RuntimeKind::Gnome);
         let p = build(d.path(), "lib.tar.gz", |b| {
@@ -1416,14 +1959,38 @@ mod tests {
         let i = analyze(&p).unwrap();
         assert!(i.is_compatible(), "{:?}", i.findings);
         let s = i.source.as_ref().unwrap();
-        assert_eq!((s.bin_name.as_str(), s.entry.clone(), s.build_script, s.network), ("srv", crate::toolchains::Entry::File("cli.js".into()), true, true));
+        assert_eq!(
+            (
+                s.bin_name.as_str(),
+                s.entry.clone(),
+                s.build_script,
+                s.network
+            ),
+            (
+                "srv",
+                crate::toolchains::Entry::File("cli.js".into()),
+                true,
+                true
+            )
+        );
         let cfg = crate::manifest::BuildConfig::from_info(&i);
         let m = cfg.manifest(&i, "icon.png", "256x256");
         let cmds = m["modules"][0]["build-commands"].to_string();
-        assert!(cmds.contains("npm run build") && cmds.contains("install.sh"), "{cmds}");
-        assert_eq!(m["sdk-extensions"][0], "org.freedesktop.Sdk.Extension.node24");
+        assert!(
+            cmds.contains("npm run build") && cmds.contains("install.sh"),
+            "{cmds}"
+        );
+        assert_eq!(
+            m["sdk-extensions"][0],
+            "org.freedesktop.Sdk.Extension.node24"
+        );
         let p = build(d.path(), "el.tar.gz", |b| {
-            add(b, "el/package.json", b"{\"name\":\"el\",\"main\":\"main.js\",\"devDependencies\":{\"electron\":\"30\"}}", 0o644);
+            add(
+                b,
+                "el/package.json",
+                b"{\"name\":\"el\",\"main\":\"main.js\",\"devDependencies\":{\"electron\":\"30\"}}",
+                0o644,
+            );
             add(b, "el/main.js", b"", 0o644);
         });
         assert!(!analyze(&p).unwrap().is_compatible());

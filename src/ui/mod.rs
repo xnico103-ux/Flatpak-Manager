@@ -2,14 +2,19 @@
 
 mod theme;
 
-use crate::chooser;
 use crate::analyze::{self, ArchiveInfo, Severity};
+use crate::chooser;
 use crate::history::{self, Action, Entry};
 use crate::manager::{self, Installed};
 use crate::manifest::{self, BuildConfig, CATEGORIES, FileAccess, IconSource, RuntimeKind};
+use crate::pipeline::{
+    self, Event, Failure, Handle, Job, Level, Options, Outcome, Phase, VerifyReport,
+};
 use crate::toolchains::{self, BuildSystem, FlatpakState, HostTool, ToolInstall, ToolMsg};
-use crate::pipeline::{self, Event, Failure, Handle, Job, Level, Options, Outcome, Phase, VerifyReport};
-use egui::{Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Sense, Stroke, TextureHandle, Ui, vec2};
+use egui::{
+    Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Sense, Stroke, TextureHandle, Ui,
+    vec2,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
@@ -169,7 +174,10 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
         Some((s, e)) => (s.to_string(), format!(".{e}")),
         None => (name.to_string(), String::new()),
     };
-    (1..1000).map(|n| dir.join(format!("{stem}-{n}{ext}"))).find(|p| !p.exists()).unwrap_or(first)
+    (1..1000)
+        .map(|n| dir.join(format!("{stem}-{n}{ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
 }
 
 fn human(bytes: u64) -> String {
@@ -180,16 +188,30 @@ fn human(bytes: u64) -> String {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 { format!("{bytes} o") } else { format!("{v:.1} {}", U[i]) }
+    if i == 0 {
+        format!("{bytes} o")
+    } else {
+        format!("{v:.1} {}", U[i])
+    }
 }
 
 fn is_archive(p: &Path) -> bool {
-    let n = p.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-    n.ends_with(".tar.gz") || n.ends_with(".tgz") || n.ends_with(".tar.xz") || n.ends_with(".txz") || n.ends_with(".tar.bz2") || n.ends_with(".tbz2") || n.ends_with(".tar.zst")
+    let n = p
+        .file_name()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    n.ends_with(".tar.gz")
+        || n.ends_with(".tgz")
+        || n.ends_with(".tar.xz")
+        || n.ends_with(".txz")
+        || n.ends_with(".tar.bz2")
+        || n.ends_with(".tbz2")
+        || n.ends_with(".tar.zst")
 }
 
 fn is_bundle(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("flatpak"))
+    p.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("flatpak"))
 }
 
 fn color_image(bytes: &[u8]) -> Option<egui::ColorImage> {
@@ -208,15 +230,30 @@ impl App {
         });
         let logo = ctx.load_texture("logo", logo_img, egui::TextureOptions::LINEAR);
         let g = manifest::generated_icon("local.flatpak.Placeholder");
-        let fallback_icon = ctx.load_texture("fallback_icon", egui::ColorImage::from_rgba_unmultiplied([256, 256], g.as_raw()), egui::TextureOptions::LINEAR);
+        let fallback_icon = ctx.load_texture(
+            "fallback_icon",
+            egui::ColorImage::from_rgba_unmultiplied([256, 256], g.as_raw()),
+            egui::TextureOptions::LINEAR,
+        );
 
         // Détection de Flatpak et Flatpak Builder en arrière-plan.
         let (tx, rx) = channel();
         let c2 = ctx.clone();
         std::thread::spawn(move || {
-            let ok = |p: &str, a: &[&str]| crate::host::cmd(p).args(a).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+            let ok = |p: &str, a: &[&str]| {
+                crate::host::cmd(p)
+                    .args(a)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            };
             let fp = ok("flatpak", &["--version"]);
-            let b = fp && (ok("flatpak-builder", &["--version"]) || ok("flatpak", &["info", "org.flatpak.Builder"]));
+            let b = fp
+                && (ok("flatpak-builder", &["--version"])
+                    || ok("flatpak", &["info", "org.flatpak.Builder"]));
             let _ = tx.send((fp, b));
             c2.request_repaint();
         });
@@ -262,7 +299,12 @@ impl App {
         } else if is_archive(&p) {
             self.start_analysis(p, Intent::Create);
         } else {
-            self.error = Some(format!("Fichier non reconnu : {} (attendu : archive .tar.gz, .tar.xz, .tar.zst, .tar.bz2 ou fichier .flatpak).", p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
+            self.error = Some(format!(
+                "Fichier non reconnu : {} (attendu : archive .tar.gz, .tar.xz, .tar.zst, .tar.bz2 ou fichier .flatpak).",
+                p.file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            ));
             self.screen = Screen::Home;
         }
     }
@@ -279,26 +321,71 @@ impl App {
             _ => String::new(),
         };
         std::thread::spawn(move || {
-            let dl = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
+            let dl = dirs::download_dir()
+                .or_else(dirs::home_dir)
+                .unwrap_or_default();
             let started = Instant::now();
             let archive_exts = ["gz", "tgz", "xz", "txz", "zst", "bz2", "tbz2"];
             let mut r = match purpose {
-                Purpose::Archive(_) => rfd::FileDialog::new().set_title("Choisir une archive").add_filter("Archives tar compressées", &archive_exts).set_directory(&dl).pick_file(),
-                Purpose::Bundle => rfd::FileDialog::new().set_title("Choisir un paquet Flatpak").add_filter("Paquets Flatpak", &["flatpak"]).set_directory(&dl).pick_file(),
-                Purpose::Save(_) => rfd::FileDialog::new().set_title("Enregistrer le paquet Flatpak").add_filter("Paquet Flatpak", &["flatpak"]).set_directory(&dl).set_file_name(&default_name).save_file(),
-                Purpose::Icon => rfd::FileDialog::new().set_title("Choisir une icône").add_filter("Images", &["png", "svg"]).pick_file(),
+                Purpose::Archive(_) => rfd::FileDialog::new()
+                    .set_title("Choisir une archive")
+                    .add_filter("Archives tar compressées", &archive_exts)
+                    .set_directory(&dl)
+                    .pick_file(),
+                Purpose::Bundle => rfd::FileDialog::new()
+                    .set_title("Choisir un paquet Flatpak")
+                    .add_filter("Paquets Flatpak", &["flatpak"])
+                    .set_directory(&dl)
+                    .pick_file(),
+                Purpose::Save(_) => rfd::FileDialog::new()
+                    .set_title("Enregistrer le paquet Flatpak")
+                    .add_filter("Paquet Flatpak", &["flatpak"])
+                    .set_directory(&dl)
+                    .set_file_name(&default_name)
+                    .save_file(),
+                Purpose::Icon => rfd::FileDialog::new()
+                    .set_title("Choisir une icône")
+                    .add_filter("Images", &["png", "svg"])
+                    .pick_file(),
             };
             // Réponse quasi immédiate sans fichier : le portail n'est probablement pas disponible
             // (hors KDE notamment). On bascule sur zenity / kdialog.
             if r.is_none() && started.elapsed() < Duration::from_millis(600) {
                 r = match purpose {
-                    Purpose::Archive(_) => chooser::open("Choisir une archive", &dl, &chooser::Filter { label: "Archives tar compressées", exts: &archive_exts }),
-                    Purpose::Bundle => chooser::open("Choisir un paquet Flatpak", &dl, &chooser::Filter { label: "Paquets Flatpak", exts: &["flatpak"] }),
-                    Purpose::Icon => chooser::open("Choisir une icône", &dl, &chooser::Filter { label: "Images", exts: &["png", "svg"] }),
+                    Purpose::Archive(_) => chooser::open(
+                        "Choisir une archive",
+                        &dl,
+                        &chooser::Filter {
+                            label: "Archives tar compressées",
+                            exts: &archive_exts,
+                        },
+                    ),
+                    Purpose::Bundle => chooser::open(
+                        "Choisir un paquet Flatpak",
+                        &dl,
+                        &chooser::Filter {
+                            label: "Paquets Flatpak",
+                            exts: &["flatpak"],
+                        },
+                    ),
+                    Purpose::Icon => chooser::open(
+                        "Choisir une icône",
+                        &dl,
+                        &chooser::Filter {
+                            label: "Images",
+                            exts: &["png", "svg"],
+                        },
+                    ),
                     Purpose::Save(_) => {
-                        let f = chooser::Filter { label: "Paquet Flatpak", exts: &["flatpak"] };
+                        let f = chooser::Filter {
+                            label: "Paquet Flatpak",
+                            exts: &["flatpak"],
+                        };
                         // Aucun sélecteur du tout : on enregistre dans le dossier Téléchargements.
-                        chooser::save("Enregistrer le paquet Flatpak", &dl, &default_name, &f).or_else(|| (!chooser::available()).then(|| unique_path(&dl, &default_name)))
+                        chooser::save("Enregistrer le paquet Flatpak", &dl, &default_name, &f)
+                            .or_else(|| {
+                                (!chooser::available()).then(|| unique_path(&dl, &default_name))
+                            })
                     }
                 };
             }
@@ -309,7 +396,10 @@ impl App {
     }
 
     fn start_analysis(&mut self, path: PathBuf, intent: Intent) {
-        let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let (tx, rx) = channel();
         let ctx = self.ctx.clone();
         let p = path.clone();
@@ -333,18 +423,27 @@ impl App {
             let _ = tx.send(r);
             ctx.request_repaint();
         });
-        self.install = Some(InstallTarget { path, report: None, rx: Some(rx) });
+        self.install = Some(InstallTarget {
+            path,
+            report: None,
+            rx: Some(rx),
+        });
         self.error = None;
         self.screen = Screen::InstallReview;
     }
 
     fn tc_scan(&mut self) {
-        let Some(src) = self.cfg.as_ref().and_then(|c| c.source.as_ref()) else { return };
+        let Some(src) = self.cfg.as_ref().and_then(|c| c.source.as_ref()) else {
+            return;
+        };
         let system = src.system;
         let (tx, rx) = channel();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send((toolchains::scan_flatpak(), toolchains::scan_host_tools(system)));
+            let _ = tx.send((
+                toolchains::scan_flatpak(),
+                toolchains::scan_host_tools(system),
+            ));
             ctx.request_repaint();
         });
         self.tc.scan_rx = Some(rx);
@@ -355,11 +454,18 @@ impl App {
         let cfg = self.cfg.as_ref()?;
         let src = cfg.source.as_ref()?;
         let state = self.tc.state.as_ref()?;
-        Some(toolchains::missing(&toolchains::components(src.system, cfg.runtime, &cfg.runtime_version, state)))
+        Some(toolchains::missing(&toolchains::components(
+            src.system,
+            cfg.runtime,
+            &cfg.runtime_version,
+            state,
+        )))
     }
 
     fn tc_install(&mut self) {
-        let Some(miss) = self.tc_missing() else { return };
+        let Some(miss) = self.tc_missing() else {
+            return;
+        };
         let Some(state) = &self.tc.state else { return };
         let plan = toolchains::install_plan(&miss, state.has_flathub);
         if plan.is_empty() {
@@ -399,33 +505,52 @@ impl App {
     /// Reçoit la liste et suit l'avancement d'une désinstallation.
     fn mg_poll(&mut self) {
         if let Some(rx) = &self.mg.rx
-            && let Ok(r) = rx.try_recv() {
-                self.mg.rx = None;
-                match r {
-                    Ok(v) => {
-                        if let Some(it) = self.mg.expect_gone.take()
-                            && v.iter().any(|x| x.id == it.id && x.branch == it.branch && x.installation == it.installation)
-                        {
-                            let tail: Vec<&str> = self.mg.lines.iter().rev().take(4).map(String::as_str).collect::<Vec<_>>().into_iter().rev().collect();
-                            self.mg.notice = None;
-                            self.mg.error = Some(format!(
-                                "flatpak a répondu « succès », mais {} est toujours installé. Dernières lignes : {}",
-                                it.name,
-                                if tail.is_empty() { "(aucune)".to_string() } else { tail.join(" | ") }
-                            ));
-                        }
-                        self.mg.items = v;
-                        self.mg.loaded = true;
-                        if std::mem::take(&mut self.mg.manual) {
-                            toast(&self.ctx, "Liste actualisée");
-                        }
+            && let Ok(r) = rx.try_recv()
+        {
+            self.mg.rx = None;
+            match r {
+                Ok(v) => {
+                    if let Some(it) = self.mg.expect_gone.take()
+                        && v.iter().any(|x| {
+                            x.id == it.id
+                                && x.branch == it.branch
+                                && x.installation == it.installation
+                        })
+                    {
+                        let tail: Vec<&str> = self
+                            .mg
+                            .lines
+                            .iter()
+                            .rev()
+                            .take(4)
+                            .map(String::as_str)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect();
+                        self.mg.notice = None;
+                        self.mg.error = Some(format!(
+                            "flatpak a répondu « succès », mais {} est toujours installé. Dernières lignes : {}",
+                            it.name,
+                            if tail.is_empty() {
+                                "(aucune)".to_string()
+                            } else {
+                                tail.join(" | ")
+                            }
+                        ));
                     }
-                    Err(e) => {
-                        self.mg.loaded = true;
-                        self.mg.error = Some(e);
+                    self.mg.items = v;
+                    self.mg.loaded = true;
+                    if std::mem::take(&mut self.mg.manual) {
+                        toast(&self.ctx, "Liste actualisée");
                     }
                 }
+                Err(e) => {
+                    self.mg.loaded = true;
+                    self.mg.error = Some(e);
+                }
             }
+        }
         let mut done = false;
         if let Some(inst) = &self.mg.install {
             while let Ok(m) = inst.rx.try_recv() {
@@ -480,20 +605,28 @@ impl App {
 
     fn up_poll(&mut self) {
         if let Some(rx) = &self.up.rx
-            && let Ok(r) = rx.try_recv() {
-                self.up.rx = None;
-                self.up.loaded = true;
-                match r {
-                    Ok(v) => {
-                        if std::mem::take(&mut self.up.manual) {
-                            let n = v.len();
-                            toast(&self.ctx, if n == 0 { "Tout est à jour".to_string() } else { format!("{n} mise(s) à jour disponible(s)") });
-                        }
-                        self.up.items = v;
+            && let Ok(r) = rx.try_recv()
+        {
+            self.up.rx = None;
+            self.up.loaded = true;
+            match r {
+                Ok(v) => {
+                    if std::mem::take(&mut self.up.manual) {
+                        let n = v.len();
+                        toast(
+                            &self.ctx,
+                            if n == 0 {
+                                "Tout est à jour".to_string()
+                            } else {
+                                format!("{n} mise(s) à jour disponible(s)")
+                            },
+                        );
                     }
-                    Err(e) => self.up.error = Some(e),
+                    self.up.items = v;
                 }
+                Err(e) => self.up.error = Some(e),
             }
+        }
         let mut done = false;
         if let Some(inst) = &self.up.install {
             while let Ok(m) = inst.rx.try_recv() {
@@ -527,8 +660,11 @@ impl App {
     }
 
     fn tc_clean(&mut self) {
-        let (Some(cfg), Some(state)) = (&self.cfg, &self.tc.state) else { return };
-        let plan = toolchains::cleanup_plan(&toolchains::cleanup_candidates(state, &cfg.runtime_version));
+        let (Some(cfg), Some(state)) = (&self.cfg, &self.tc.state) else {
+            return;
+        };
+        let plan =
+            toolchains::cleanup_plan(&toolchains::cleanup_candidates(state, &cfg.runtime_version));
         self.tc.clean_ask = false;
         if plan.is_empty() {
             return;
@@ -542,21 +678,36 @@ impl App {
     }
 
     fn load_icon_preview(&mut self) {
-        let (Some(info), Some(cfg)) = (&self.info, &self.cfg) else { return };
+        let (Some(info), Some(cfg)) = (&self.info, &self.cfg) else {
+            return;
+        };
         let src = cfg.icon.clone();
         let archive = info.path.clone();
         let (tx, rx) = channel();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             let bytes = match src {
-                IconSource::FromArchive { raw, is_svg: false } => analyze::read_member(&archive, &raw, 5 << 20).ok(),
-                IconSource::File(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) => std::fs::read(p).ok(),
+                IconSource::FromArchive { raw, is_svg: false } => {
+                    analyze::read_member(&archive, &raw, 5 << 20).ok()
+                }
+                IconSource::File(p)
+                    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) =>
+                {
+                    std::fs::read(p).ok()
+                }
                 _ => None,
             };
-            let img = bytes.and_then(|b| image::load_from_memory(&b).ok()).map(|i| {
-                let i = i.resize(128, 128, image::imageops::FilterType::Lanczos3).to_rgba8();
-                egui::ColorImage::from_rgba_unmultiplied([i.width() as usize, i.height() as usize], i.as_raw())
-            });
+            let img = bytes
+                .and_then(|b| image::load_from_memory(&b).ok())
+                .map(|i| {
+                    let i = i
+                        .resize(128, 128, image::imageops::FilterType::Lanczos3)
+                        .to_rgba8();
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [i.width() as usize, i.height() as usize],
+                        i.as_raw(),
+                    )
+                });
             let _ = tx.send(img);
             ctx.request_repaint();
         });
@@ -565,18 +716,29 @@ impl App {
     }
 
     fn start_run(&mut self, intent: Intent, out: PathBuf) {
-        let (Some(info), Some(mut cfg)) = (self.info.clone(), self.cfg.clone()) else { return };
+        let (Some(info), Some(mut cfg)) = (self.info.clone(), self.cfg.clone()) else {
+            return;
+        };
         if let (Some(src), Some(st)) = (cfg.source.as_mut(), self.tc.state.as_ref()) {
             src.extension = toolchains::resolve_extension(src.system, &cfg.runtime_version, st);
         }
         let mut opts = self.opts;
-        opts.confirm_before_install = self.advanced && opts.confirm_before_install && intent == Intent::CreateInstall;
+        opts.confirm_before_install =
+            self.advanced && opts.confirm_before_install && intent == Intent::CreateInstall;
         let ctx = self.ctx.clone();
         let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || ctx.request_repaint());
         let (name, app_id, version) = (cfg.name.clone(), cfg.app_id.clone(), cfg.version.clone());
         let job = match intent {
-            Intent::Create => Job::Create { info, cfg: Box::new(cfg), out },
-            Intent::CreateInstall => Job::CreateInstall { info, cfg: Box::new(cfg), out },
+            Intent::Create => Job::Create {
+                info,
+                cfg: Box::new(cfg),
+                out,
+            },
+            Intent::CreateInstall => Job::CreateInstall {
+                info,
+                cfg: Box::new(cfg),
+                out,
+            },
         };
         let handle = pipeline::spawn(job, opts, notify);
         self.run = Some(Run {
@@ -588,7 +750,11 @@ impl App {
             log: vec![],
             awaiting: None,
             report: None,
-            action: if intent == Intent::Create { Action::Created } else { Action::CreatedAndInstalled },
+            action: if intent == Intent::Create {
+                Action::Created
+            } else {
+                Action::CreatedAndInstalled
+            },
             started: Instant::now(),
             name,
             app_id,
@@ -604,9 +770,19 @@ impl App {
         let handle = {
             let ctx = self.ctx.clone();
             let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || ctx.request_repaint());
-            pipeline::spawn(Job::Install { bundle: t.path.clone() }, self.opts, notify)
+            pipeline::spawn(
+                Job::Install {
+                    bundle: t.path.clone(),
+                },
+                self.opts,
+                notify,
+            )
         };
-        let name = t.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = t
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         self.run = Some(Run {
             handle,
             plan: vec![],
@@ -630,33 +806,36 @@ impl App {
     // ------------------------------------------------------------------ logique
     fn poll(&mut self) {
         if let Some(rx) = &self.flatpak_rx
-            && let Ok(s) = rx.try_recv() {
-                self.flatpak_state = Some(s);
-                self.flatpak_rx = None;
-            }
+            && let Ok(s) = rx.try_recv()
+        {
+            self.flatpak_state = Some(s);
+            self.flatpak_rx = None;
+        }
         if let Some((rx, purpose)) = &self.picker
-            && let Ok(res) = rx.try_recv() {
-                let purpose = *purpose;
-                self.picker = None;
-                if let Some(path) = res {
-                    match purpose {
-                        Purpose::Archive(i) => self.start_analysis(path, i),
-                        Purpose::Bundle => self.start_install_review(path),
-                        Purpose::Save(i) => self.start_run(i, path),
-                        Purpose::Icon => {
-                            if let Some(c) = &mut self.cfg {
-                                c.icon = IconSource::File(path);
-                            }
-                            self.load_icon_preview();
+            && let Ok(res) = rx.try_recv()
+        {
+            let purpose = *purpose;
+            self.picker = None;
+            if let Some(path) = res {
+                match purpose {
+                    Purpose::Archive(i) => self.start_analysis(path, i),
+                    Purpose::Bundle => self.start_install_review(path),
+                    Purpose::Save(i) => self.start_run(i, path),
+                    Purpose::Icon => {
+                        if let Some(c) = &mut self.cfg {
+                            c.icon = IconSource::File(path);
                         }
+                        self.load_icon_preview();
                     }
                 }
             }
+        }
         let mut analysis_done = None;
         if let Some((rx, _)) = &self.analysis
-            && let Ok(r) = rx.try_recv() {
-                analysis_done = Some(r);
-            }
+            && let Ok(r) = rx.try_recv()
+        {
+            analysis_done = Some(r);
+        }
         if let Some(r) = analysis_done {
             self.analysis = None;
             match r {
@@ -679,19 +858,28 @@ impl App {
             }
         }
         if let Some(rx) = &self.tc.scan_rx
-            && let Ok((state, tools)) = rx.try_recv() {
-                self.tc.scan_rx = None;
-                // Première analyse : on s'aligne sur le SDK déjà présent sur la machine.
-                if !self.tc.version_set {
-                    self.tc.version_set = true;
-                    if let Some(c) = &mut self.cfg
-                        && c.source.is_some() && c.runtime == RuntimeKind::Freedesktop {
-                            c.runtime_version = toolchains::pick_branch(&state, c.source.as_ref().map(|s| s.system.extension_candidates()).unwrap_or(&[]));
-                        }
+            && let Ok((state, tools)) = rx.try_recv()
+        {
+            self.tc.scan_rx = None;
+            // Première analyse : on s'aligne sur le SDK déjà présent sur la machine.
+            if !self.tc.version_set {
+                self.tc.version_set = true;
+                if let Some(c) = &mut self.cfg
+                    && c.source.is_some()
+                    && c.runtime == RuntimeKind::Freedesktop
+                {
+                    c.runtime_version = toolchains::pick_branch(
+                        &state,
+                        c.source
+                            .as_ref()
+                            .map(|s| s.system.extension_candidates())
+                            .unwrap_or(&[]),
+                    );
                 }
-                self.tc.state = Some(state);
-                self.tc.tools = tools;
             }
+            self.tc.state = Some(state);
+            self.tc.tools = tools;
+        }
         self.mg_poll();
         self.up_poll();
         let mut tc_rescan = false;
@@ -707,7 +895,14 @@ impl App {
                     ToolMsg::Progress(p) => self.tc.progress = p,
                     ToolMsg::Done(r) => {
                         self.tc.error = r.err();
-                        toast(&self.ctx, if self.tc.error.is_none() { "Opération terminée" } else { "Échec : voir le message affiché" });
+                        toast(
+                            &self.ctx,
+                            if self.tc.error.is_none() {
+                                "Opération terminée"
+                            } else {
+                                "Échec : voir le message affiché"
+                            },
+                        );
                         self.tc.progress = 1.0;
                         tc_rescan = true;
                     }
@@ -721,16 +916,21 @@ impl App {
             self.tc_scan();
         }
         if let Some(rx) = &self.icon_rx
-            && let Ok(img) = rx.try_recv() {
-                self.icon_rx = None;
-                self.icon_tex = img.map(|i| self.ctx.load_texture("app_icon", i, egui::TextureOptions::LINEAR));
-            }
+            && let Ok(img) = rx.try_recv()
+        {
+            self.icon_rx = None;
+            self.icon_tex = img.map(|i| {
+                self.ctx
+                    .load_texture("app_icon", i, egui::TextureOptions::LINEAR)
+            });
+        }
         if let Some(t) = &mut self.install
             && let Some(rx) = &t.rx
-                && let Ok(r) = rx.try_recv() {
-                    t.report = Some(r);
-                    t.rx = None;
-                }
+            && let Ok(r) = rx.try_recv()
+        {
+            t.report = Some(r);
+            t.rx = None;
+        }
         // Événements du pipeline
         let mut finished: Option<Result<Outcome, Failure>> = None;
         if let Some(run) = &mut self.run {
@@ -753,42 +953,79 @@ impl App {
             }
         }
         if let Some(result) = finished
-            && let Some(run) = self.run.take() {
-                let cancelled = result.as_ref().err().is_some_and(|f| f.cancelled);
-                if !cancelled {
-                    let (success, action, bundle) = match &result {
-                        Ok(o) => (
-                            true,
-                            if run.action == Action::CreatedAndInstalled && !o.installed { Action::Created } else { run.action },
-                            o.bundle.clone(),
-                        ),
-                        Err(_) => (false, run.action, None),
-                    };
-                    let (name, app_id, version) = match &result {
-                        Ok(o) if !o.name.is_empty() => (o.name.clone(), o.app_id.clone(), o.version.clone()),
-                        _ => (run.name.clone(), run.app_id.clone(), run.version.clone()),
-                    };
-                    self.history.insert(0, Entry { timestamp: chrono::Utc::now().timestamp(), action, name, app_id, version, bundle, success });
-                    self.history.truncate(200);
-                    history::save(&self.history);
-                }
-                let report = run.report.clone();
-                self.done = Some(Done { result, report, log: run.log, action: run.action, elapsed: run.started.elapsed(), plan: run.plan, phase: run.phase });
-                self.screen = Screen::Done;
+            && let Some(run) = self.run.take()
+        {
+            let cancelled = result.as_ref().err().is_some_and(|f| f.cancelled);
+            if !cancelled {
+                let (success, action, bundle) = match &result {
+                    Ok(o) => (
+                        true,
+                        if run.action == Action::CreatedAndInstalled && !o.installed {
+                            Action::Created
+                        } else {
+                            run.action
+                        },
+                        o.bundle.clone(),
+                    ),
+                    Err(_) => (false, run.action, None),
+                };
+                let (name, app_id, version) = match &result {
+                    Ok(o) if !o.name.is_empty() => {
+                        (o.name.clone(), o.app_id.clone(), o.version.clone())
+                    }
+                    _ => (run.name.clone(), run.app_id.clone(), run.version.clone()),
+                };
+                self.history.insert(
+                    0,
+                    Entry {
+                        timestamp: chrono::Utc::now().timestamp(),
+                        action,
+                        name,
+                        app_id,
+                        version,
+                        bundle,
+                        success,
+                    },
+                );
+                self.history.truncate(200);
+                history::save(&self.history);
             }
+            let report = run.report.clone();
+            self.done = Some(Done {
+                result,
+                report,
+                log: run.log,
+                action: run.action,
+                elapsed: run.started.elapsed(),
+                plan: run.plan,
+                phase: run.phase,
+            });
+            self.screen = Screen::Done;
+        }
         // Glisser-déposer
-        let dropped: Vec<PathBuf> = self.ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        let dropped: Vec<PathBuf> = self.ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
         if let Some(p) = dropped.into_iter().next()
-            && !matches!(self.screen, Screen::Running | Screen::Analyzing) {
-                self.open_path(p);
-            }
+            && !matches!(self.screen, Screen::Running | Screen::Analyzing)
+        {
+            self.open_path(p);
+        }
     }
 
     // ------------------------------------------------------------------ vues
     fn sidebar(&mut self, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.add(egui::Image::new(&self.logo).fit_to_exact_size(vec2(40.0, 40.0)).corner_radius(10));
+            ui.add(
+                egui::Image::new(&self.logo)
+                    .fit_to_exact_size(vec2(40.0, 40.0))
+                    .corner_radius(10),
+            );
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.label(RichText::new("Flatpak").strong().size(17.0));
@@ -797,11 +1034,28 @@ impl App {
         });
         ui.add_space(22.0);
         let busy = matches!(self.screen, Screen::Running);
-        if nav_item(ui, "Accueil", !matches!(self.screen, Screen::History | Screen::Manage | Screen::Updates)).clicked() && !busy
-            && matches!(self.screen, Screen::History | Screen::Manage | Screen::Updates) {
-                self.screen = Screen::Home;
-            }
-        let ulabel = if self.up.loaded && !self.up.items.is_empty() { format!("Mises à jour ({})", self.up.items.len()) } else { "Mises à jour".to_string() };
+        if nav_item(
+            ui,
+            "Accueil",
+            !matches!(
+                self.screen,
+                Screen::History | Screen::Manage | Screen::Updates
+            ),
+        )
+        .clicked()
+            && !busy
+            && matches!(
+                self.screen,
+                Screen::History | Screen::Manage | Screen::Updates
+            )
+        {
+            self.screen = Screen::Home;
+        }
+        let ulabel = if self.up.loaded && !self.up.items.is_empty() {
+            format!("Mises à jour ({})", self.up.items.len())
+        } else {
+            "Mises à jour".to_string()
+        };
         if nav_item(ui, &ulabel, self.screen == Screen::Updates).clicked() && !busy {
             self.screen = Screen::Updates;
             if !self.up.loaded && self.up.rx.is_none() {
@@ -828,7 +1082,14 @@ impl App {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if toggle(ui, &mut self.advanced).changed() {
-                        toast(ui.ctx(), if self.advanced { "Mode avancé activé" } else { "Mode avancé désactivé" });
+                        toast(
+                            ui.ctx(),
+                            if self.advanced {
+                                "Mode avancé activé"
+                            } else {
+                                "Mode avancé désactivé"
+                            },
+                        );
                     }
                 });
             });
@@ -840,34 +1101,55 @@ impl App {
     fn ui_home(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
         ui.label(RichText::new("Que voulez-vous faire ?").heading().strong());
-        ui.label(muted("Créez ou installez une application Flatpak en quelques clics, sans terminal."));
+        ui.label(muted(
+            "Créez ou installez une application Flatpak en quelques clics, sans terminal.",
+        ));
         ui.add_space(14.0);
 
         if let Some(id) = crate::host::sandbox_blocked() {
             sandbox_banner(ui, &id);
         } else if let Some((fp, _)) = self.flatpak_state {
             if !fp {
-                banner(ui, DANGER, "Flatpak n'est pas détecté sur ce système", "Installez le paquet « flatpak » avec votre gestionnaire de paquets (ex. : sudo pacman -S flatpak, sudo apt install flatpak, sudo dnf install flatpak), puis relancez Flatpak Manager.");
+                banner(
+                    ui,
+                    DANGER,
+                    "Flatpak n'est pas détecté sur ce système",
+                    "Installez le paquet « flatpak » avec votre gestionnaire de paquets (ex. : sudo pacman -S flatpak, sudo apt install flatpak, sudo dnf install flatpak), puis relancez Flatpak Manager.",
+                );
             } else if let Some((_, false)) = self.flatpak_state {
-                banner(ui, ACCENT, "Flatpak Builder sera installé automatiquement", "Au premier usage, l'outil de construction (org.flatpak.Builder) sera téléchargé depuis Flathub pour votre utilisateur.");
+                banner(
+                    ui,
+                    ACCENT,
+                    "Flatpak Builder sera installé automatiquement",
+                    "Au premier usage, l'outil de construction (org.flatpak.Builder) sera téléchargé depuis Flathub pour votre utilisateur.",
+                );
             }
         }
         let mut dismiss = false;
         if let Some(e) = &self.error {
             ui.horizontal_top(|ui| {
-                Frame::new().fill(DANGER.gamma_multiply(0.12)).stroke(Stroke::new(1.0, DANGER.gamma_multiply(0.5))).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(14)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(ui.available_width() - 90.0);
-                            ui.label(RichText::new("Impossible d'ouvrir ce fichier").strong().color(DANGER));
-                            ui.add(egui::Label::new(muted(e.clone())).wrap());
+                Frame::new()
+                    .fill(DANGER.gamma_multiply(0.12))
+                    .stroke(Stroke::new(1.0, DANGER.gamma_multiply(0.5)))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(ui.available_width() - 90.0);
+                                ui.label(
+                                    RichText::new("Impossible d'ouvrir ce fichier")
+                                        .strong()
+                                        .color(DANGER),
+                                );
+                                ui.add(egui::Label::new(muted(e.clone())).wrap());
+                            });
+                            if button(ui, "Fermer", BtnKind::Ghost).clicked() {
+                                dismiss = true;
+                            }
                         });
-                        if button(ui, "Fermer", BtnKind::Ghost).clicked() {
-                            dismiss = true;
-                        }
                     });
-                });
             });
             ui.add_space(6.0);
         }
@@ -879,13 +1161,27 @@ impl App {
         let avail = ui.available_width();
         let gap = 16.0;
         let stacked = avail < 640.0;
-        let w = if stacked { avail } else { (avail - 2.0 * gap) / 3.0 };
+        let w = if stacked {
+            avail
+        } else {
+            (avail - 2.0 * gap) / 3.0
+        };
         let mut pick: Option<Purpose> = None;
         let mut cards = |ui: &mut Ui| {
             if action_card(ui, w, IconKind::Package, "Créer un Flatpak", "Choisissez une archive (.tar.gz, .tar.xz…) : elle est analysée, puis convertie en fichier .flatpak.", ACCENT, !busy).clicked() {
                 pick = Some(Purpose::Archive(Intent::Create));
             }
-            if action_card(ui, w, IconKind::Install, "Installer un Flatpak", "Sélectionnez un fichier .flatpak existant pour l'installer sur ce système.", SUCCESS, !busy).clicked() {
+            if action_card(
+                ui,
+                w,
+                IconKind::Install,
+                "Installer un Flatpak",
+                "Sélectionnez un fichier .flatpak existant pour l'installer sur ce système.",
+                SUCCESS,
+                !busy,
+            )
+            .clicked()
+            {
                 pick = Some(Purpose::Bundle);
             }
             if action_card(ui, w, IconKind::Bolt, "Créer et installer", "Tout en une fois : création du paquet depuis l'archive, puis installation automatique.", Color32::from_rgb(192, 132, 252), !busy).clicked() {
@@ -952,7 +1248,9 @@ impl App {
             if let Some((_, name)) = &self.analysis {
                 ui.label(muted(name.clone()));
             }
-            ui.label(muted("Contrôles de sécurité, recherche de l'exécutable et des dépendances."));
+            ui.label(muted(
+                "Contrôles de sécurité, recherche de l'exécutable et des dépendances.",
+            ));
         });
     }
 
@@ -963,53 +1261,89 @@ impl App {
             match (&self.tc.state, self.tc_missing()) {
                 _ if self.tc.install.is_some() => Some("Installation en cours…".into()),
                 (None, _) => Some("Analyse du système…".into()),
-                (Some(st), _) if !st.available => Some("Flatpak est introuvable sur ce système.".into()),
-                (_, Some(m)) if !m.is_empty() => Some("Installez d'abord les composants manquants.".into()),
+                (Some(st), _) if !st.available => {
+                    Some("Flatpak est introuvable sur ce système.".into())
+                }
+                (_, Some(m)) if !m.is_empty() => {
+                    Some("Installez d'abord les composants manquants.".into())
+                }
                 _ => None,
             }
         } else {
             None
         };
-        let Some(info) = self.info.as_deref() else { return };
+        let Some(info) = self.info.as_deref() else {
+            return;
+        };
         let Some(cfg) = self.cfg.as_mut() else { return };
         let problems = manifest::validate(cfg, info);
         let compat = info.is_compatible();
-        let warn = info.findings.iter().any(|f| f.severity == Severity::Warning);
+        let warn = info
+            .findings
+            .iter()
+            .any(|f| f.severity == Severity::Warning);
         let mut action: Option<&'static str> = None;
         let mut icon_changed = false;
 
         // Barre d'actions
-        egui::Panel::bottom("review_bar").frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(0, 10))).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if button(ui, "Retour", BtnKind::Ghost).clicked() {
-                    action = Some("back");
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let ok = compat && problems.is_empty() && self.picker.is_none() && tc_block.is_none();
-                    let (pk, sk) = if self.intent == Intent::Create { (BtnKind::Primary, BtnKind::Secondary) } else { (BtnKind::Secondary, BtnKind::Primary) };
-                    ui.add_enabled_ui(ok, |ui| {
-                        // Dans un layout droite→gauche, le dernier ajouté est le plus à gauche.
-                        let second_is_install = self.intent == Intent::Create;
-                        let (a, b) = if second_is_install { (("Créer et installer", "ci", sk), ("Créer le paquet", "c", pk)) } else { (("Créer le paquet", "c", sk), ("Créer et installer", "ci", pk)) };
-                        // a est placé à droite, b à sa gauche : on veut l'action principale à droite.
-                        let (right, left) = if pk == BtnKind::Primary { (b, a) } else { (a, b) };
-                        if button(ui, right.0, right.2).clicked() {
-                            action = Some(right.1);
-                        }
-                        if button(ui, left.0, left.2).clicked() {
-                            action = Some(left.1);
+        egui::Panel::bottom("review_bar")
+            .frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(0, 10)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if button(ui, "Retour", BtnKind::Ghost).clicked() {
+                        action = Some("back");
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let ok = compat
+                            && problems.is_empty()
+                            && self.picker.is_none()
+                            && tc_block.is_none();
+                        let (pk, sk) = if self.intent == Intent::Create {
+                            (BtnKind::Primary, BtnKind::Secondary)
+                        } else {
+                            (BtnKind::Secondary, BtnKind::Primary)
+                        };
+                        ui.add_enabled_ui(ok, |ui| {
+                            // Dans un layout droite→gauche, le dernier ajouté est le plus à gauche.
+                            let second_is_install = self.intent == Intent::Create;
+                            let (a, b) = if second_is_install {
+                                (
+                                    ("Créer et installer", "ci", sk),
+                                    ("Créer le paquet", "c", pk),
+                                )
+                            } else {
+                                (
+                                    ("Créer le paquet", "c", sk),
+                                    ("Créer et installer", "ci", pk),
+                                )
+                            };
+                            // a est placé à droite, b à sa gauche : on veut l'action principale à droite.
+                            let (right, left) = if pk == BtnKind::Primary {
+                                (b, a)
+                            } else {
+                                (a, b)
+                            };
+                            if button(ui, right.0, right.2).clicked() {
+                                action = Some(right.1);
+                            }
+                            if button(ui, left.0, left.2).clicked() {
+                                action = Some(left.1);
+                            }
+                        });
+                        if let Some(p) = problems.first() {
+                            ui.label(RichText::new(p.clone()).color(DANGER).size(13.0));
+                        } else if let Some(b) = compat.then_some(()).and(tc_block.as_ref()) {
+                            ui.label(RichText::new(b.clone()).color(WARN).size(13.0));
+                        } else if !compat {
+                            ui.label(
+                                RichText::new("Cette archive ne peut pas être convertie.")
+                                    .color(DANGER)
+                                    .size(13.0),
+                            );
                         }
                     });
-                    if let Some(p) = problems.first() {
-                        ui.label(RichText::new(p.clone()).color(DANGER).size(13.0));
-                    } else if let Some(b) = compat.then_some(()).and(tc_block.as_ref()) {
-                        ui.label(RichText::new(b.clone()).color(WARN).size(13.0));
-                    } else if !compat {
-                        ui.label(RichText::new("Cette archive ne peut pas être convertie.").color(DANGER).size(13.0));
-                    }
                 });
             });
-        });
 
         egui::CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
             ui.add_space(6.0);
@@ -1275,11 +1609,16 @@ impl App {
             }
             Some("tc_copy") => {
                 if let Some(m) = self.tc_missing()
-                    && let Some(st) = &self.tc.state {
-                        let text = toolchains::install_plan(&m, st.has_flathub).iter().map(|a| toolchains::shell_line(a)).collect::<Vec<_>>().join("\n");
-                        self.ctx.copy_text(text);
-                        toast(&self.ctx, "Commande copiée dans le presse-papiers");
-                    }
+                    && let Some(st) = &self.tc.state
+                {
+                    let text = toolchains::install_plan(&m, st.has_flathub)
+                        .iter()
+                        .map(|a| toolchains::shell_line(a))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    self.ctx.copy_text(text);
+                    toast(&self.ctx, "Commande copiée dans le presse-papiers");
+                }
             }
             Some("c") => {
                 self.intent = Intent::Create;
@@ -1319,11 +1658,26 @@ impl App {
         });
         ui.add_space(6.0);
         card(ui, Some("Options"), |ui| {
-            ui.label(muted("Par défaut, l'application est installée pour votre utilisateur uniquement.").size(13.0));
+            ui.label(
+                muted("Par défaut, l'application est installée pour votre utilisateur uniquement.")
+                    .size(13.0),
+            );
             if advanced {
-                perm_row(ui, &mut self.opts.system_install, "Installer pour tous les utilisateurs", "Installation système (demande une authentification).", Some(Severity::Info));
+                perm_row(
+                    ui,
+                    &mut self.opts.system_install,
+                    "Installer pour tous les utilisateurs",
+                    "Installation système (demande une authentification).",
+                    Some(Severity::Info),
+                );
             }
-            perm_row(ui, &mut self.opts.replace_existing, "Remplacer une installation existante", "Réinstalle l'application ; vos données sont conservées.", None);
+            perm_row(
+                ui,
+                &mut self.opts.replace_existing,
+                "Remplacer une installation existante",
+                "Réinstalle l'application ; vos données sont conservées.",
+                None,
+            );
         });
         ui.add_space(10.0);
         let ok = matches!(&t.report, Some(Ok(r)) if !r.items.iter().any(|(s, _)| *s == Severity::Blocker));
@@ -1353,7 +1707,11 @@ impl App {
             Action::Installed => "Installation",
         };
         ui.add_space(8.0);
-        ui.label(RichText::new(format!("{title} en cours…")).heading().strong());
+        ui.label(
+            RichText::new(format!("{title} en cours…"))
+                .heading()
+                .strong(),
+        );
         if !run.name.is_empty() {
             ui.label(muted(format!("{} {}", run.name, run.version)));
         }
@@ -1364,7 +1722,18 @@ impl App {
                 .plan
                 .iter()
                 .enumerate()
-                .map(|(i, p)| (p.label(), if i < cur { StepState::Done } else if i == cur { StepState::Active } else { StepState::Pending }))
+                .map(|(i, p)| {
+                    (
+                        p.label(),
+                        if i < cur {
+                            StepState::Done
+                        } else if i == cur {
+                            StepState::Active
+                        } else {
+                            StepState::Pending
+                        },
+                    )
+                })
                 .collect();
             stepper(ui, &steps, false);
             ui.add_space(6.0);
@@ -1378,23 +1747,27 @@ impl App {
         });
         if let Some(rep) = run.awaiting.clone() {
             ui.add_space(8.0);
-            card(ui, Some("Vérification terminée : confirmer l'installation ?"), |ui| {
-                for (s, m) in &rep.items {
-                    dot_row(ui, severity_color(*s), m, "");
-                }
-                ui.label(muted(format!("SHA-256 du paquet : {}", rep.sha256)).size(12.0));
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if button(ui, "Installer maintenant", BtnKind::Primary).clicked() {
-                        let _ = run.handle.confirm_tx.send(true);
-                        run.awaiting = None;
+            card(
+                ui,
+                Some("Vérification terminée : confirmer l'installation ?"),
+                |ui| {
+                    for (s, m) in &rep.items {
+                        dot_row(ui, severity_color(*s), m, "");
                     }
-                    if button(ui, "Ne pas installer", BtnKind::Secondary).clicked() {
-                        let _ = run.handle.confirm_tx.send(false);
-                        run.awaiting = None;
-                    }
-                });
-            });
+                    ui.label(muted(format!("SHA-256 du paquet : {}", rep.sha256)).size(12.0));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if button(ui, "Installer maintenant", BtnKind::Primary).clicked() {
+                            let _ = run.handle.confirm_tx.send(true);
+                            run.awaiting = None;
+                        }
+                        if button(ui, "Ne pas installer", BtnKind::Secondary).clicked() {
+                            let _ = run.handle.confirm_tx.send(false);
+                            run.awaiting = None;
+                        }
+                    });
+                },
+            );
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -1403,10 +1776,22 @@ impl App {
                 ui.label(muted("Annulation en cours…"));
             } else if button(ui, "Annuler", BtnKind::Danger).clicked() {
                 run.cancelling = true;
-                run.handle.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+                run.handle
+                    .cancel
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 let _ = run.handle.confirm_tx.send(false);
             }
-            if button(ui, if *show_log { "Masquer les détails" } else { "Afficher les détails" }, BtnKind::Ghost).clicked() {
+            if button(
+                ui,
+                if *show_log {
+                    "Masquer les détails"
+                } else {
+                    "Afficher les détails"
+                },
+                BtnKind::Ghost,
+            )
+            .clicked()
+            {
                 *show_log = !*show_log;
             }
         });
@@ -1418,105 +1803,161 @@ impl App {
     fn ui_done(&mut self, ui: &mut Ui) {
         let Some(d) = &self.done else { return };
         let mut action = None;
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.add_space(12.0);
-            match &d.result {
-                Ok(o) => {
-                    ui.horizontal(|ui| {
-                        big_status_icon(ui, true);
-                        ui.vertical(|ui| {
-                            ui.add_space(6.0);
-                            let t = if o.installed {
-                                if d.action == Action::Installed { "Installation terminée" } else { "Paquet créé et installé" }
-                            } else {
-                                "Paquet créé"
-                            };
-                            ui.label(RichText::new(t).heading().strong());
-                            ui.label(muted(format!("Terminé en {} s", d.elapsed.as_secs())));
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(12.0);
+                match &d.result {
+                    Ok(o) => {
+                        ui.horizontal(|ui| {
+                            big_status_icon(ui, true);
+                            ui.vertical(|ui| {
+                                ui.add_space(6.0);
+                                let t = if o.installed {
+                                    if d.action == Action::Installed {
+                                        "Installation terminée"
+                                    } else {
+                                        "Paquet créé et installé"
+                                    }
+                                } else {
+                                    "Paquet créé"
+                                };
+                                ui.label(RichText::new(t).heading().strong());
+                                ui.label(muted(format!("Terminé en {} s", d.elapsed.as_secs())));
+                            });
                         });
-                    });
-                    ui.add_space(10.0);
-                    card(ui, Some("Résultat"), |ui| {
-                        if !o.name.is_empty() {
-                            ui.label(RichText::new(format!("{} {}", o.name, o.version)).strong());
-                        }
-                        if !o.app_id.is_empty() {
-                            ui.label(muted(o.app_id.clone()));
-                        }
-                        if let Some(b) = &o.bundle {
-                            ui.add_space(4.0);
-                            ui.label(muted(format!("Fichier : {}", b.display())));
-                        }
-                        if let Some(r) = &d.report {
-                            ui.add_space(6.0);
-                            for (s, m) in &r.items {
-                                dot_row(ui, severity_color(*s), m, "");
+                        ui.add_space(10.0);
+                        card(ui, Some("Résultat"), |ui| {
+                            if !o.name.is_empty() {
+                                ui.label(
+                                    RichText::new(format!("{} {}", o.name, o.version)).strong(),
+                                );
                             }
-                        }
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if o.installed && !o.app_id.is_empty() && button(ui, "Lancer l'application", BtnKind::Primary).clicked() {
-                            action = Some("launch");
-                        }
-                        if o.bundle.is_some() && button(ui, "Ouvrir le dossier", BtnKind::Secondary).clicked() {
-                            action = Some("folder");
-                        }
-                        if o.bundle.is_some() && !o.installed && d.action != Action::Installed && button(ui, "Installer maintenant", BtnKind::Secondary).clicked() {
-                            action = Some("install");
-                        }
-                        if button(ui, "Accueil", BtnKind::Ghost).clicked() {
-                            action = Some("home");
-                        }
-                    });
-                }
-                Err(f) => {
-                    ui.horizontal(|ui| {
-                        big_status_icon(ui, false);
-                        ui.vertical(|ui| {
-                            ui.add_space(6.0);
-                            ui.label(RichText::new(if f.cancelled { "Opération annulée" } else { "Échec de l'opération" }).heading().strong());
-                            ui.add(egui::Label::new(muted(f.message.clone())).wrap());
-                        });
-                    });
-                    if !d.plan.is_empty() {
-                        ui.add_space(8.0);
-                        card(ui, None, |ui| {
-                            let cur = d.plan.iter().position(|p| *p == d.phase).unwrap_or(0);
-                            let steps: Vec<(&str, StepState)> = d.plan.iter().enumerate().map(|(i, p)| (p.label(), if i < cur { StepState::Done } else if i == cur { StepState::Active } else { StepState::Pending })).collect();
-                            stepper(ui, &steps, !f.cancelled);
-                        });
-                    }
-                    if !f.diagnoses.is_empty() {
-                        ui.add_space(8.0);
-                        card(ui, Some("Diagnostic"), |ui| {
-                            for dg in &f.diagnoses {
-                                dot_row(ui, WARN, &dg.title, &dg.explanation);
-                                if let Some(fix) = &dg.fix {
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(22.0);
-                                        ui.add(egui::Label::new(RichText::new(format!("Piste : {fix}")).color(ACCENT).size(13.5)).wrap());
-                                    });
+                            if !o.app_id.is_empty() {
+                                ui.label(muted(o.app_id.clone()));
+                            }
+                            if let Some(b) = &o.bundle {
+                                ui.add_space(4.0);
+                                ui.label(muted(format!("Fichier : {}", b.display())));
+                            }
+                            if let Some(r) = &d.report {
+                                ui.add_space(6.0);
+                                for (s, m) in &r.items {
+                                    dot_row(ui, severity_color(*s), m, "");
                                 }
                             }
                         });
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if o.installed
+                                && !o.app_id.is_empty()
+                                && button(ui, "Lancer l'application", BtnKind::Primary).clicked()
+                            {
+                                action = Some("launch");
+                            }
+                            if o.bundle.is_some()
+                                && button(ui, "Ouvrir le dossier", BtnKind::Secondary).clicked()
+                            {
+                                action = Some("folder");
+                            }
+                            if o.bundle.is_some()
+                                && !o.installed
+                                && d.action != Action::Installed
+                                && button(ui, "Installer maintenant", BtnKind::Secondary).clicked()
+                            {
+                                action = Some("install");
+                            }
+                            if button(ui, "Accueil", BtnKind::Ghost).clicked() {
+                                action = Some("home");
+                            }
+                        });
                     }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if self.info.is_some() && button(ui, "Modifier et réessayer", BtnKind::Primary).clicked() {
-                            action = Some("review");
+                    Err(f) => {
+                        ui.horizontal(|ui| {
+                            big_status_icon(ui, false);
+                            ui.vertical(|ui| {
+                                ui.add_space(6.0);
+                                ui.label(
+                                    RichText::new(if f.cancelled {
+                                        "Opération annulée"
+                                    } else {
+                                        "Échec de l'opération"
+                                    })
+                                    .heading()
+                                    .strong(),
+                                );
+                                ui.add(egui::Label::new(muted(f.message.clone())).wrap());
+                            });
+                        });
+                        if !d.plan.is_empty() {
+                            ui.add_space(8.0);
+                            card(ui, None, |ui| {
+                                let cur = d.plan.iter().position(|p| *p == d.phase).unwrap_or(0);
+                                let steps: Vec<(&str, StepState)> = d
+                                    .plan
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, p)| {
+                                        (
+                                            p.label(),
+                                            if i < cur {
+                                                StepState::Done
+                                            } else if i == cur {
+                                                StepState::Active
+                                            } else {
+                                                StepState::Pending
+                                            },
+                                        )
+                                    })
+                                    .collect();
+                                stepper(ui, &steps, !f.cancelled);
+                            });
                         }
-                        if button(ui, "Accueil", BtnKind::Ghost).clicked() {
-                            action = Some("home");
+                        if !f.diagnoses.is_empty() {
+                            ui.add_space(8.0);
+                            card(ui, Some("Diagnostic"), |ui| {
+                                for dg in &f.diagnoses {
+                                    dot_row(ui, WARN, &dg.title, &dg.explanation);
+                                    if let Some(fix) = &dg.fix {
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(22.0);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(format!("Piste : {fix}"))
+                                                        .color(ACCENT)
+                                                        .size(13.5),
+                                                )
+                                                .wrap(),
+                                            );
+                                        });
+                                    }
+                                }
+                            });
                         }
-                    });
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if self.info.is_some()
+                                && button(ui, "Modifier et réessayer", BtnKind::Primary).clicked()
+                            {
+                                action = Some("review");
+                            }
+                            if button(ui, "Accueil", BtnKind::Ghost).clicked() {
+                                action = Some("home");
+                            }
+                        });
+                    }
                 }
-            }
-            ui.add_space(8.0);
-            egui::CollapsingHeader::new("Journal détaillé").show(ui, |ui| log_view(ui, &d.log, 320.0));
-        });
+                ui.add_space(8.0);
+                egui::CollapsingHeader::new("Journal détaillé")
+                    .show(ui, |ui| log_view(ui, &d.log, 320.0));
+            });
         let bundle = d.result.as_ref().ok().and_then(|o| o.bundle.clone());
-        let app_id = d.result.as_ref().ok().map(|o| o.app_id.clone()).unwrap_or_default();
+        let app_id = d
+            .result
+            .as_ref()
+            .ok()
+            .map(|o| o.app_id.clone())
+            .unwrap_or_default();
         match action {
             Some("home") => self.screen = Screen::Home,
             Some("review") => self.screen = Screen::Review,
@@ -1556,11 +1997,20 @@ impl App {
 
         ui.horizontal_wrapped(|ui| {
             ui.add_enabled_ui(!busy && n_all > 0, |ui| {
-                if button(ui, format!("Tout mettre à jour ({n_all})").as_str(), BtnKind::Primary).clicked() {
+                if button(
+                    ui,
+                    format!("Tout mettre à jour ({n_all})").as_str(),
+                    BtnKind::Primary,
+                )
+                .clicked()
+                {
                     action = Some(("all", 0));
                 }
             });
-            if button(ui, "Rechercher", BtnKind::Secondary).clicked() && !busy && self.up.rx.is_none() {
+            if button(ui, "Rechercher", BtnKind::Secondary).clicked()
+                && !busy
+                && self.up.rx.is_none()
+            {
                 action = Some(("reload", 0));
             }
             ui.checkbox(&mut self.up.show_runtimes, "Afficher les runtimes");
@@ -1577,7 +2027,15 @@ impl App {
                 progress_bar(ui, self.up.progress, 8.0);
                 let start = self.up.lines.len().saturating_sub(6);
                 for l in &self.up.lines[start..] {
-                    ui.add(egui::Label::new(RichText::new(single_line_trunc(l, 90)).monospace().color(MUTED).size(12.0)).truncate());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(single_line_trunc(l, 90))
+                                .monospace()
+                                .color(MUTED)
+                                .size(12.0),
+                        )
+                        .truncate(),
+                    );
                 }
                 if button(ui, "Annuler", BtnKind::Danger).clicked() {
                     action = Some(("stop", 0));
@@ -1674,12 +2132,18 @@ impl App {
         let mut action: Option<(&'static str, usize)> = None;
 
         ui.horizontal_wrapped(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.mg.filter).hint_text("Rechercher…").desired_width(240.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.mg.filter)
+                    .hint_text("Rechercher…")
+                    .desired_width(240.0),
+            );
             ui.checkbox(&mut self.mg.show_runtimes, "Afficher les runtimes et SDK");
             if button(ui, "Actualiser", BtnKind::Ghost).clicked() && !busy {
                 action = Some(("reload", 0));
             }
-            if button(ui, "Retirer les composants inutilisés…", BtnKind::Secondary).clicked() && !busy {
+            if button(ui, "Retirer les composants inutilisés…", BtnKind::Secondary).clicked()
+                && !busy
+            {
                 action = Some(("unused_ask", 0));
             }
         });
@@ -1694,9 +2158,15 @@ impl App {
 
         // Confirmation : la commande exacte est affichée avant toute suppression.
         let plan = if let Some(it) = &self.mg.pending {
-            Some((format!("Désinstaller {} ?", it.name), manager::uninstall_plan(it, self.mg.delete_data)))
+            Some((
+                format!("Désinstaller {} ?", it.name),
+                manager::uninstall_plan(it, self.mg.delete_data),
+            ))
         } else if self.mg.pending_unused {
-            Some(("Retirer les runtimes qu'aucune application n'utilise ?".to_string(), manager::unused_plan()))
+            Some((
+                "Retirer les runtimes qu'aucune application n'utilise ?".to_string(),
+                manager::unused_plan(),
+            ))
         } else {
             None
         };
@@ -1705,17 +2175,33 @@ impl App {
             let system = self.mg.pending.as_ref().is_some_and(|i| !i.is_user());
             card(ui, None, |ui| {
                 ui.label(RichText::new(format!("⚠ {title}")).strong().color(WARN));
-                ui.add(egui::Label::new(muted("Commande destructive : elle sera exécutée telle quelle.").size(13.0)).wrap());
+                ui.add(
+                    egui::Label::new(
+                        muted("Commande destructive : elle sera exécutée telle quelle.").size(13.0),
+                    )
+                    .wrap(),
+                );
                 if system {
                     ui.add(egui::Label::new(muted("Installation système : une demande d'authentification peut s'afficher.").size(13.0)).wrap());
                 }
                 ui.add_space(4.0);
                 for argv in &cmds {
-                    ui.add(egui::Label::new(RichText::new(format!("$ {}", toolchains::shell_line(argv))).monospace().size(12.5).color(WARN)).wrap());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("$ {}", toolchains::shell_line(argv)))
+                                .monospace()
+                                .size(12.5)
+                                .color(WARN),
+                        )
+                        .wrap(),
+                    );
                 }
                 if offer_wipe {
                     ui.add_space(4.0);
-                    ui.checkbox(&mut self.mg.delete_data, "Supprimer aussi les données de l'application (--delete-data)");
+                    ui.checkbox(
+                        &mut self.mg.delete_data,
+                        "Supprimer aussi les données de l'application (--delete-data)",
+                    );
                 }
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
@@ -1735,7 +2221,15 @@ impl App {
                 progress_bar(ui, self.mg.progress, 8.0);
                 let start = self.mg.lines.len().saturating_sub(6);
                 for l in &self.mg.lines[start..] {
-                    ui.add(egui::Label::new(RichText::new(single_line_trunc(l, 90)).monospace().color(MUTED).size(12.0)).truncate());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(single_line_trunc(l, 90))
+                                .monospace()
+                                .color(MUTED)
+                                .size(12.0),
+                        )
+                        .truncate(),
+                    );
                 }
                 if button(ui, "Annuler", BtnKind::Danger).clicked() {
                     action = Some(("stop", 0));
@@ -1751,45 +2245,67 @@ impl App {
             });
         }
         let q = self.mg.filter.trim().to_lowercase();
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let mut shown = 0;
-            for (i, it) in self.mg.items.iter().enumerate() {
-                if (it.runtime && !self.mg.show_runtimes) || (!q.is_empty() && !it.name.to_lowercase().contains(&q) && !it.id.to_lowercase().contains(&q)) {
-                    continue;
-                }
-                shown += 1;
-                card(ui, None, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(&it.name).strong());
-                                if !it.version.is_empty() {
-                                    ui.label(muted(&it.version).size(12.5));
-                                }
-                                badge(ui, if it.is_user() { "utilisateur" } else { &it.installation }, if it.is_user() { ACCENT } else { MUTED });
-                                if it.runtime {
-                                    badge(ui, "runtime", MUTED);
-                                }
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut shown = 0;
+                for (i, it) in self.mg.items.iter().enumerate() {
+                    if (it.runtime && !self.mg.show_runtimes)
+                        || (!q.is_empty()
+                            && !it.name.to_lowercase().contains(&q)
+                            && !it.id.to_lowercase().contains(&q))
+                    {
+                        continue;
+                    }
+                    shown += 1;
+                    card(ui, None, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(&it.name).strong());
+                                    if !it.version.is_empty() {
+                                        ui.label(muted(&it.version).size(12.5));
+                                    }
+                                    badge(
+                                        ui,
+                                        if it.is_user() {
+                                            "utilisateur"
+                                        } else {
+                                            &it.installation
+                                        },
+                                        if it.is_user() { ACCENT } else { MUTED },
+                                    );
+                                    if it.runtime {
+                                        badge(ui, "runtime", MUTED);
+                                    }
+                                });
+                                ui.label(
+                                    muted(format!("{}//{}  ·  {}", it.id, it.branch, it.size))
+                                        .size(12.5),
+                                );
                             });
-                            ui.label(muted(format!("{}//{}  ·  {}", it.id, it.branch, it.size)).size(12.5));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let is_self = own_id.as_deref() == Some(it.id.as_str());
-                            if is_self {
-                                ui.label(muted("application en cours").size(12.5));
-                            } else if button(ui, "Désinstaller…", BtnKind::Danger).clicked() && !busy {
-                                action = Some(("ask", i));
-                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let is_self = own_id.as_deref() == Some(it.id.as_str());
+                                    if is_self {
+                                        ui.label(muted("application en cours").size(12.5));
+                                    } else if button(ui, "Désinstaller…", BtnKind::Danger).clicked()
+                                        && !busy
+                                    {
+                                        action = Some(("ask", i));
+                                    }
+                                },
+                            );
                         });
                     });
-                });
-            }
-            if self.mg.loaded && shown == 0 {
-                card(ui, None, |ui| {
-                    ui.label(muted("Aucun paquet à afficher."));
-                });
-            }
-        });
+                }
+                if self.mg.loaded && shown == 0 {
+                    card(ui, None, |ui| {
+                        ui.label(muted("Aucun paquet à afficher."));
+                    });
+                }
+            });
 
         match action {
             Some(("reload", _)) => {
@@ -1837,40 +2353,52 @@ impl App {
     fn ui_history(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
         ui.label(RichText::new("Historique").heading().strong());
-        ui.label(muted("Les paquets créés et installés avec Flatpak Manager."));
+        ui.label(muted(
+            "Les paquets créés et installés avec Flatpak Manager.",
+        ));
         ui.add_space(10.0);
         let mut action: Option<(&str, usize)> = None;
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            if self.history.is_empty() {
-                card(ui, None, |ui| {
-                    ui.label(muted("Rien pour l'instant : vos opérations apparaîtront ici."));
-                });
-            }
-            for (i, e) in self.history.iter().enumerate() {
-                card(ui, None, |ui| {
-                    history_line(ui, e);
-                    ui.horizontal(|ui| {
-                        let exists = e.bundle.as_ref().is_some_and(|b| b.exists());
-                        if exists && e.success {
-                            if button(ui, "Installer", BtnKind::Secondary).clicked() {
-                                action = Some(("install", i));
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if self.history.is_empty() {
+                    card(ui, None, |ui| {
+                        ui.label(muted(
+                            "Rien pour l'instant : vos opérations apparaîtront ici.",
+                        ));
+                    });
+                }
+                for (i, e) in self.history.iter().enumerate() {
+                    card(ui, None, |ui| {
+                        history_line(ui, e);
+                        ui.horizontal(|ui| {
+                            let exists = e.bundle.as_ref().is_some_and(|b| b.exists());
+                            if exists && e.success {
+                                if button(ui, "Installer", BtnKind::Secondary).clicked() {
+                                    action = Some(("install", i));
+                                }
+                                if button(ui, "Ouvrir le dossier", BtnKind::Ghost).clicked() {
+                                    action = Some(("folder", i));
+                                }
+                            } else if e.bundle.is_some() {
+                                ui.label(muted("Fichier introuvable").size(12.5));
                             }
-                            if button(ui, "Ouvrir le dossier", BtnKind::Ghost).clicked() {
-                                action = Some(("folder", i));
-                            }
-                        } else if e.bundle.is_some() {
-                            ui.label(muted("Fichier introuvable").size(12.5));
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if button(ui, "Retirer de la liste", BtnKind::Ghost).on_hover_text("Ne supprime pas le fichier .flatpak").clicked() {
-                                action = Some(("remove", i));
-                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if button(ui, "Retirer de la liste", BtnKind::Ghost)
+                                        .on_hover_text("Ne supprime pas le fichier .flatpak")
+                                        .clicked()
+                                    {
+                                        action = Some(("remove", i));
+                                    }
+                                },
+                            );
                         });
                     });
-                });
-                ui.add_space(2.0);
-            }
-        });
+                    ui.add_space(2.0);
+                }
+            });
         if let Some((a, i)) = action {
             match a {
                 "install" => {
@@ -1897,21 +2425,44 @@ impl App {
 
 fn nav_item(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
-    let t = ui.ctx().animate_bool_with_time(resp.id, resp.hovered(), 0.12);
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
     let p = ui.painter();
     if selected {
         p.rect_filled(rect, CornerRadius::same(10), ACCENT.gamma_multiply(0.16));
-        p.rect_filled(egui::Rect::from_min_size(rect.min + vec2(0.0, 9.0), vec2(3.0, 22.0)), CornerRadius::same(2), ACCENT);
+        p.rect_filled(
+            egui::Rect::from_min_size(rect.min + vec2(0.0, 9.0), vec2(3.0, 22.0)),
+            CornerRadius::same(2),
+            ACCENT,
+        );
     } else if t > 0.0 {
-        p.rect_filled(rect, CornerRadius::same(10), Color32::from_white_alpha((14.0 * t) as u8));
+        p.rect_filled(
+            rect,
+            CornerRadius::same(10),
+            Color32::from_white_alpha((14.0 * t) as u8),
+        );
     }
-    p.text(rect.left_center() + vec2(16.0, 0.0), egui::Align2::LEFT_CENTER, label, egui::FontId::new(15.0, egui::FontFamily::Proportional), if selected { TEXT } else { MUTED });
+    p.text(
+        rect.left_center() + vec2(16.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::new(15.0, egui::FontFamily::Proportional),
+        if selected { TEXT } else { MUTED },
+    );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Carte « Environnement de compilation » : outils détectés, composants Flatpak requis,
 /// commande d'installation affichée avant exécution.
-fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, version: &str, tc: &Toolchain, action: &mut Option<&'static str>) {
+fn toolchain_card(
+    ui: &mut Ui,
+    system: BuildSystem,
+    runtime: RuntimeKind,
+    version: &str,
+    tc: &Toolchain,
+    action: &mut Option<&'static str>,
+) {
     card(ui, Some("Environnement de compilation"), |ui| {
         ui.horizontal(|ui| {
             badge(ui, system.label(), ACCENT);
@@ -1933,7 +2484,12 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
             return;
         }
         if !state.available {
-            dot_row(ui, DANGER, "Flatpak est introuvable", "Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis cliquez sur « Revérifier ».");
+            dot_row(
+                ui,
+                DANGER,
+                "Flatpak est introuvable",
+                "Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis cliquez sur « Revérifier ».",
+            );
             if button(ui, "Revérifier", BtnKind::Secondary).clicked() {
                 *action = Some("tc_rescan");
             }
@@ -1944,7 +2500,11 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
             for t in &tc.tools {
                 let (c, d) = match &t.version {
                     Some(v) => (SUCCESS, v.clone()),
-                    None => (MUTED, "non trouvé (sans importance : la compilation utilise le SDK Flatpak)".to_string()),
+                    None => (
+                        MUTED,
+                        "non trouvé (sans importance : la compilation utilise le SDK Flatpak)"
+                            .to_string(),
+                    ),
                 };
                 dot_row(ui, c, &t.name, &d);
             }
@@ -1953,7 +2513,11 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
         ui.label(RichText::new("Composants Flatpak requis").strong());
         let comps = toolchains::components(system, runtime, version, state);
         for c in &comps {
-            let d = format!("{} — {}", c.reference(), if c.installed { "installé" } else { "manquant" });
+            let d = format!(
+                "{} — {}",
+                c.reference(),
+                if c.installed { "installé" } else { "manquant" }
+            );
             dot_row(ui, if c.installed { SUCCESS } else { DANGER }, &c.label, &d);
         }
         let miss = toolchains::missing(&comps);
@@ -1965,15 +2529,31 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
         }
         ui.add_space(8.0);
         ui.label(RichText::new("Commande qui sera exécutée").strong());
-        Frame::new().fill(INPUT).stroke(Stroke::new(1.0, BORDER)).corner_radius(CornerRadius::same(10)).inner_margin(Margin::same(10)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ScrollArea::horizontal().id_salt("tc_cmd").auto_shrink([false, true]).show(ui, |ui| {
-                for argv in toolchains::install_plan(&miss, state.has_flathub) {
-                    ui.add(egui::Label::new(RichText::new(format!("$ {}", toolchains::shell_line(&argv))).monospace().size(12.5).color(ACCENT)).extend());
-                }
-                ui.add_space(4.0);
+        Frame::new()
+            .fill(INPUT)
+            .stroke(Stroke::new(1.0, BORDER))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ScrollArea::horizontal()
+                    .id_salt("tc_cmd")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for argv in toolchains::install_plan(&miss, state.has_flathub) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("$ {}", toolchains::shell_line(&argv)))
+                                        .monospace()
+                                        .size(12.5)
+                                        .color(ACCENT),
+                                )
+                                .extend(),
+                            );
+                        }
+                        ui.add_space(4.0);
+                    });
             });
-        });
         ui.add(egui::Label::new(muted("« -y » évite que Flatpak pose la question dans un terminal. Seul l'utilisateur courant est concerné (--user).").size(12.5)).wrap());
         if let Some(e) = &tc.error {
             ui.add_space(4.0);
@@ -1985,7 +2565,15 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
             ui.add_space(4.0);
             let start = tc.lines.len().saturating_sub(5);
             for l in &tc.lines[start..] {
-                ui.add(egui::Label::new(RichText::new(single_line_trunc(l, 70)).monospace().color(MUTED).size(12.0)).truncate());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(single_line_trunc(l, 70))
+                            .monospace()
+                            .color(MUTED)
+                            .size(12.0),
+                    )
+                    .truncate(),
+                );
             }
             ui.add_space(4.0);
             if button(ui, "Annuler", BtnKind::Danger).clicked() {
@@ -2009,14 +2597,28 @@ fn toolchain_card(ui: &mut Ui, system: BuildSystem, runtime: RuntimeKind, versio
 }
 
 /// Ménage des anciennes versions de SDK : commande affichée, confirmation explicite avant suppression.
-fn cleanup_section(ui: &mut Ui, tc: &Toolchain, state: &FlatpakState, version: &str, action: &mut Option<&'static str>) {
+fn cleanup_section(
+    ui: &mut Ui,
+    tc: &Toolchain,
+    state: &FlatpakState,
+    version: &str,
+    action: &mut Option<&'static str>,
+) {
     if tc.install.is_some() {
         // Un ménage (ou une installation) est en cours : on affiche sa progression ici.
         ui.add_space(8.0);
         progress_bar(ui, tc.progress, 8.0);
         let start = tc.lines.len().saturating_sub(5);
         for l in &tc.lines[start..] {
-            ui.add(egui::Label::new(RichText::new(single_line_trunc(l, 70)).monospace().color(MUTED).size(12.0)).truncate());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(single_line_trunc(l, 70))
+                        .monospace()
+                        .color(MUTED)
+                        .size(12.0),
+                )
+                .truncate(),
+            );
         }
         if button(ui, "Annuler", BtnKind::Danger).clicked() {
             *action = Some("tc_cancel");
@@ -2038,16 +2640,41 @@ fn cleanup_section(ui: &mut Ui, tc: &Toolchain, state: &FlatpakState, version: &
         return;
     }
     ui.add_space(4.0);
-    ui.add(egui::Label::new(RichText::new("⚠ Ces commandes suppriment des composants (réinstallables depuis Flathub) :").color(WARN).size(13.0)).wrap());
-    Frame::new().fill(INPUT).stroke(Stroke::new(1.0, BORDER)).corner_radius(CornerRadius::same(10)).inner_margin(Margin::same(10)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ScrollArea::horizontal().id_salt("tc_clean_cmd").auto_shrink([false, true]).show(ui, |ui| {
-            for argv in toolchains::cleanup_plan(&cands) {
-                ui.add(egui::Label::new(RichText::new(format!("$ {}", toolchains::shell_line(&argv))).monospace().size(12.5).color(WARN)).extend());
-            }
-            ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(
+            RichText::new(
+                "⚠ Ces commandes suppriment des composants (réinstallables depuis Flathub) :",
+            )
+            .color(WARN)
+            .size(13.0),
+        )
+        .wrap(),
+    );
+    Frame::new()
+        .fill(INPUT)
+        .stroke(Stroke::new(1.0, BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ScrollArea::horizontal()
+                .id_salt("tc_clean_cmd")
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for argv in toolchains::cleanup_plan(&cands) {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("$ {}", toolchains::shell_line(&argv)))
+                                    .monospace()
+                                    .size(12.5)
+                                    .color(WARN),
+                            )
+                            .extend(),
+                        );
+                    }
+                    ui.add_space(4.0);
+                });
         });
-    });
     ui.add(egui::Label::new(muted("La 2ᵉ commande retire aussi tout runtime qu'aucune application installée n'utilise. Les applications installées ne sont pas touchées.").size(12.5)).wrap());
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
@@ -2062,10 +2689,23 @@ fn cleanup_section(ui: &mut Ui, tc: &Toolchain, state: &FlatpakState, version: &
 
 /// Application lancée dans un Flatpak sans la permission d'appeler `flatpak` sur l'hôte.
 fn sandbox_banner(ui: &mut Ui, app_id: &str) {
-    banner(ui, DANGER, "Permission manquante : l'application tourne dans un Flatpak", "Pour gérer les Flatpak de votre machine, elle doit être autorisée à lancer des commandes sur l'hôte. Copiez cette commande dans un terminal, puis relancez l'application :");
+    banner(
+        ui,
+        DANGER,
+        "Permission manquante : l'application tourne dans un Flatpak",
+        "Pour gérer les Flatpak de votre machine, elle doit être autorisée à lancer des commandes sur l'hôte. Copiez cette commande dans un terminal, puis relancez l'application :",
+    );
     let cmd = crate::host::override_command(app_id);
     ui.horizontal_wrapped(|ui| {
-        ui.add(egui::Label::new(RichText::new(format!("$ {cmd}")).monospace().size(12.5).color(ACCENT)).wrap());
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("$ {cmd}"))
+                    .monospace()
+                    .size(12.5)
+                    .color(ACCENT),
+            )
+            .wrap(),
+        );
         if button(ui, "Copier", BtnKind::Ghost).clicked() {
             ui.ctx().copy_text(cmd.clone());
             toast(ui.ctx(), "Commande copiée dans le presse-papiers");
@@ -2075,21 +2715,41 @@ fn sandbox_banner(ui: &mut Ui, app_id: &str) {
 }
 
 fn banner(ui: &mut Ui, color: Color32, title: &str, text: &str) {
-    Frame::new().fill(color.gamma_multiply(0.1)).stroke(Stroke::new(1.0, color.gamma_multiply(0.45))).corner_radius(CornerRadius::same(12)).inner_margin(Margin::same(14)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.label(RichText::new(title).strong().color(color));
-        ui.add(egui::Label::new(muted(text).size(13.5)).wrap());
-    });
+    Frame::new()
+        .fill(color.gamma_multiply(0.1))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::same(14))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(title).strong().color(color));
+            ui.add(egui::Label::new(muted(text).size(13.5)).wrap());
+        });
     ui.add_space(8.0);
 }
 
 fn history_line(ui: &mut Ui, e: &Entry) {
-    let when = chrono::DateTime::from_timestamp(e.timestamp, 0).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or_default();
+    let when = chrono::DateTime::from_timestamp(e.timestamp, 0)
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%d/%m/%Y %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(14.0, 20.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 4.5, if e.success { SUCCESS } else { DANGER });
+        ui.painter()
+            .circle_filled(rect.center(), 4.5, if e.success { SUCCESS } else { DANGER });
         ui.label(RichText::new(format!("{} {}", e.name, e.version)).strong());
-        badge(ui, if e.success { e.action.label() } else { "Échec" }, if e.success { ACCENT } else { DANGER });
+        badge(
+            ui,
+            if e.success {
+                e.action.label()
+            } else {
+                "Échec"
+            },
+            if e.success { ACCENT } else { DANGER },
+        );
         ui.label(muted(when).size(12.5));
     });
     if !e.app_id.is_empty() {
@@ -2098,22 +2758,33 @@ fn history_line(ui: &mut Ui, e: &Entry) {
 }
 
 fn log_view(ui: &mut Ui, log: &[(Level, String)], height: f32) {
-    Frame::new().fill(INPUT).stroke(Stroke::new(1.0, BORDER)).corner_radius(CornerRadius::same(10)).inner_margin(Margin::same(10)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ScrollArea::vertical().max_height(height).stick_to_bottom(true).auto_shrink([false, true]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            for (l, s) in log {
-                let c = match l {
-                    Level::Info => TEXT,
-                    Level::Cmd => ACCENT,
-                    Level::Warn => WARN,
-                    Level::Error => DANGER,
-                    Level::Out => MUTED,
-                };
-                ui.add(egui::Label::new(RichText::new(s.as_str()).monospace().color(c)).wrap());
-            }
+    Frame::new()
+        .fill(INPUT)
+        .stroke(Stroke::new(1.0, BORDER))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ScrollArea::vertical()
+                .max_height(height)
+                .stick_to_bottom(true)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (l, s) in log {
+                        let c = match l {
+                            Level::Info => TEXT,
+                            Level::Cmd => ACCENT,
+                            Level::Warn => WARN,
+                            Level::Error => DANGER,
+                            Level::Out => MUTED,
+                        };
+                        ui.add(
+                            egui::Label::new(RichText::new(s.as_str()).monospace().color(c)).wrap(),
+                        );
+                    }
+                });
         });
-    });
 }
 
 impl eframe::App for App {
@@ -2125,27 +2796,62 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::left("sidebar").exact_size(232.0).resizable(false).frame(Frame::new().fill(SIDEBAR).inner_margin(Margin::same(16))).show_separator_line(false).show(ui, |ui| self.sidebar(ui));
-        egui::CentralPanel::default().frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(28, 18))).show(ui, |ui| match self.screen {
-            Screen::Home => self.ui_home(ui),
-            Screen::Analyzing => self.ui_analyzing(ui),
-            Screen::Review => self.ui_review(ui),
-            Screen::InstallReview => self.ui_install_review(ui),
-            Screen::Running => self.ui_running(ui),
-            Screen::Done => self.ui_done(ui),
-            Screen::History => self.ui_history(ui),
-            Screen::Manage => self.ui_manage(ui),
-            Screen::Updates => self.ui_updates(ui),
-        });
+        egui::Panel::left("sidebar")
+            .exact_size(232.0)
+            .resizable(false)
+            .frame(Frame::new().fill(SIDEBAR).inner_margin(Margin::same(16)))
+            .show_separator_line(false)
+            .show(ui, |ui| self.sidebar(ui));
+        egui::CentralPanel::default()
+            .frame(
+                Frame::new()
+                    .fill(BG)
+                    .inner_margin(Margin::symmetric(28, 18)),
+            )
+            .show(ui, |ui| match self.screen {
+                Screen::Home => self.ui_home(ui),
+                Screen::Analyzing => self.ui_analyzing(ui),
+                Screen::Review => self.ui_review(ui),
+                Screen::InstallReview => self.ui_install_review(ui),
+                Screen::Running => self.ui_running(ui),
+                Screen::Done => self.ui_done(ui),
+                Screen::History => self.ui_history(ui),
+                Screen::Manage => self.ui_manage(ui),
+                Screen::Updates => self.ui_updates(ui),
+            });
         // Indication de dépôt de fichier
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
         if hovering && !matches!(self.screen, Screen::Running | Screen::Analyzing) {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::NULL.with("dnd")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::NULL.with("dnd"),
+            ));
             let rect = ui.ctx().content_rect();
-            painter.rect_filled(rect, CornerRadius::ZERO, Color32::from_rgba_unmultiplied(8, 10, 16, 215));
-            painter.rect_stroke(rect.shrink(18.0), CornerRadius::same(18), Stroke::new(2.0, ACCENT), egui::StrokeKind::Inside);
-            painter.text(rect.center() - vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Déposez un fichier ici", egui::FontId::new(26.0, egui::FontFamily::Proportional), TEXT);
-            painter.text(rect.center() + vec2(0.0, 22.0), egui::Align2::CENTER_CENTER, "archive .tar.* pour créer, .flatpak pour installer", egui::FontId::new(15.0, egui::FontFamily::Proportional), MUTED);
+            painter.rect_filled(
+                rect,
+                CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(8, 10, 16, 215),
+            );
+            painter.rect_stroke(
+                rect.shrink(18.0),
+                CornerRadius::same(18),
+                Stroke::new(2.0, ACCENT),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                rect.center() - vec2(0.0, 12.0),
+                egui::Align2::CENTER_CENTER,
+                "Déposez un fichier ici",
+                egui::FontId::new(26.0, egui::FontFamily::Proportional),
+                TEXT,
+            );
+            painter.text(
+                rect.center() + vec2(0.0, 22.0),
+                egui::Align2::CENTER_CENTER,
+                "archive .tar.* pour créer, .flatpak pour installer",
+                egui::FontId::new(15.0, egui::FontFamily::Proportional),
+                MUTED,
+            );
         }
         self.draw_toast(ui);
         if matches!(self.screen, Screen::Running | Screen::Analyzing) {
@@ -2163,14 +2869,27 @@ impl App {
             self.toast = None;
             return;
         }
-        let fade = if el > 2.5 { 1.0 - (el - 2.5) / 0.5 } else { (el / 0.12).min(1.0) };
+        let fade = if el > 2.5 {
+            1.0 - (el - 2.5) / 0.5
+        } else {
+            (el / 0.12).min(1.0)
+        };
         let ctx = ui.ctx().clone();
-        egui::Area::new(egui::Id::NULL.with("fm_toast_area")).order(egui::Order::Tooltip).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -26.0)).interactable(false).show(&ctx, |ui| {
-            ui.set_opacity(fade);
-            Frame::new().fill(Color32::from_rgb(28, 38, 56)).stroke(Stroke::new(1.0, ACCENT)).corner_radius(CornerRadius::same(12)).inner_margin(Margin::symmetric(18, 11)).show(ui, |ui| {
-                ui.label(RichText::new(format!("✓  {msg}")).color(TEXT).strong());
+        egui::Area::new(egui::Id::NULL.with("fm_toast_area"))
+            .order(egui::Order::Tooltip)
+            .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -26.0))
+            .interactable(false)
+            .show(&ctx, |ui| {
+                ui.set_opacity(fade);
+                Frame::new()
+                    .fill(Color32::from_rgb(28, 38, 56))
+                    .stroke(Stroke::new(1.0, ACCENT))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::symmetric(18, 11))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(format!("✓  {msg}")).color(TEXT).strong());
+                    });
             });
-        });
         ctx.request_repaint_after(Duration::from_millis(30));
     }
 }

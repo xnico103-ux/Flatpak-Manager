@@ -39,7 +39,11 @@ pub fn load() -> Vec<Entry> {
     // Ancien emplacement (avant le renommage en Flatpak Manager) en repli.
     let old = dirs::data_dir().map(|d| d.join("flatpak-creator").join("history.json"));
     file()
-        .and_then(|p| std::fs::read_to_string(p).ok().or_else(|| old.and_then(|o| std::fs::read_to_string(o).ok())))
+        .and_then(|p| {
+            std::fs::read_to_string(p)
+                .ok()
+                .or_else(|| old.and_then(|o| std::fs::read_to_string(o).ok()))
+        })
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
