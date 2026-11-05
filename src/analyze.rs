@@ -118,6 +118,8 @@ pub struct Hints {
     pub gtk: bool,
     pub gui: bool,
     pub network_likely: bool,
+    /// Accès direct au matériel (USB, HID, hidraw…) : demande `--device=all`.
+    pub devices: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -634,7 +636,15 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
 
     // Archive de sources ? Seuls les fichiers de build à la racine du projet comptent.
     let root_len = if top_dir.is_some() { 2 } else { 1 };
-    let root_build: Vec<BuildFile> = build_raw.into_iter().filter(|(p, _)| p.len() == root_len).map(|(_, f)| f).collect();
+    let mut root_build: Vec<BuildFile> = build_raw.iter().filter(|(p, _)| p.len() == root_len).map(|(_, f)| f.clone()).collect();
+    // Espace de travail Cargo : les Cargo.toml des sous-dossiers (gui/, cli/…) disent si le projet est graphique.
+    if root_build.iter().any(|f| f.name == "cargo.toml") {
+        for (p, f) in &build_raw {
+            if p.len() == root_len + 1 && f.name == "cargo.toml" {
+                root_build.push(BuildFile { name: "member:cargo.toml".into(), content: f.content.clone() });
+            }
+        }
+    }
     // Un ELF isolé au fond d'un projet (outil de test, bibliothèque fournie) ne fait pas de l'archive une application déjà compilée.
     let has_elf = executables.iter().any(|e| matches!(e.kind, ExecKind::Elf { .. }) && e.rel.split('/').count() <= 2 && e.score >= 10);
     let skip = if top_dir.is_some() { 1 } else { 0 };
@@ -722,6 +732,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         qt: qt_bundled || source.as_ref().is_some_and(|s| s.qt),
         gtk: gtk_bundled || source.as_ref().is_some_and(|s| s.gtk),
         gui: source.as_ref().is_some_and(|s| s.gui),
+        devices: source.as_ref().is_some_and(|s| s.devices),
         ..Default::default()
     };
     let kind = match main_exec.map(|i| &executables[i].kind) {

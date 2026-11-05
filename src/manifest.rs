@@ -302,7 +302,7 @@ impl BuildConfig {
                 network: hints.network_likely || info.source.as_ref().is_some_and(|p| p.network),
                 files: FileAccess::None,
                 removable_media: false,
-                all_devices: false,
+                all_devices: hints.devices,
                 notifications: hints.gui,
                 tray: false,
                 printing: false,

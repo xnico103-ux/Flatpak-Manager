@@ -129,6 +129,8 @@ pub struct SourceProject {
     /// Vrai si le nom du binaire a été lu dans les fichiers du projet (et non deviné).
     pub bin_certain: bool,
     pub gui: bool,
+    /// Accès direct au matériel (USB, HID).
+    pub devices: bool,
     /// Accès réseau probablement nécessaire à l'exécution.
     pub network: bool,
     pub qt: bool,
@@ -245,6 +247,7 @@ fn project(system: BuildSystem, bin: (String, bool), content: &str, gui_words: &
         bin_name: bin.0,
         bin_certain: bin.1,
         gui: any_of(content, gui_words),
+        devices: false,
         network: false,
         qt: any_of(content, &["qt5", "qt6", "find_package(qt", "dependency('qt", "dependency(\"qt"]),
         gtk: any_of(content, &["gtk+-3", "gtk4", "gtk3", "find_package(gtk", "dependency('gtk", "dependency(\"gtk"]),
@@ -269,7 +272,7 @@ pub fn detect(files: &[BuildFile], exec_names: &[String], has_elf: bool, fallbac
     let get = |n: &str| files.iter().find(|f| f.name == n);
 
     if let Some(f) = get("cargo.toml") {
-        return Some(Detection::Supported(cargo(f, fallback_name, src_files)));
+        return Some(Detection::Supported(cargo(f, files, fallback_name, src_files)));
     }
     if let Some(f) = get("go.mod") {
         let module = f.content.lines().find_map(|l| l.trim().strip_prefix("module ")).map(|m| m.trim().trim_matches('"').to_string());
@@ -709,7 +712,7 @@ fn java(jars: &[String], fallback: &str) -> SourceProject {
     p
 }
 
-fn cargo(f: &BuildFile, fallback: &str, src_files: &[String]) -> SourceProject {
+fn cargo(f: &BuildFile, files: &[BuildFile], fallback: &str, src_files: &[String]) -> SourceProject {
     let table: Option<toml::Table> = f.content.parse().ok();
     let pkg = table.as_ref().and_then(|t| t.get("package")).and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from);
     let bins: Vec<String> = table
@@ -723,9 +726,43 @@ fn cargo(f: &BuildFile, fallback: &str, src_files: &[String]) -> SourceProject {
         Some(p) if bins.is_empty() || bins.contains(p) => Some(p.clone()),
         _ => bins.first().cloned().or(pkg.clone()),
     };
-    let certain = name.is_some() && !workspace;
+    let gui_words = ["eframe", "egui", "iced", "slint", "gtk4", "relm4", "tauri", "fltk", "floem", "winit", "sdl2", "bevy", "macroquad"];
+    // Espace de travail : le programme à installer est celui du membre qui dépend d'une bibliothèque graphique.
+    let mut name = name;
+    let mut workspace_gui_bin = false;
+    if workspace {
+        for m in files.iter().filter(|m| m.name == "member:cargo.toml") {
+            if !any_of(&m.content, &gui_words) {
+                continue;
+            }
+            let t: Option<toml::Table> = m.content.parse().ok();
+            let bin = t
+                .as_ref()
+                .and_then(|t| t.get("bin"))
+                .and_then(|b| b.as_array())
+                .and_then(|a| a.first())
+                .and_then(|x| x.get("name"))
+                .and_then(|n| n.as_str())
+                .or_else(|| t.as_ref().and_then(|t| t.get("package")).and_then(|p| p.get("name")).and_then(|n| n.as_str()));
+            if let Some(b) = bin {
+                name = Some(b.to_string());
+                workspace_gui_bin = true;
+                break;
+            }
+        }
+    }
+    let certain = name.is_some() && (!workspace || workspace_gui_bin);
     let (n, _) = pick(name, fallback);
-    let mut p = project(BuildSystem::Cargo, (n, certain), &f.content, &["eframe", "egui", "iced", "slint", "gtk4", "relm4", "tauri", "fltk", "floem", "winit", "sdl2", "bevy", "macroquad"]);
+    let all_toml: String = files.iter().filter(|m| m.name == "cargo.toml" || m.name == "member:cargo.toml").map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n");
+    let mut p = project(BuildSystem::Cargo, (n, certain), &all_toml, &gui_words);
+    p.devices = any_of(&all_toml, &["hidapi", "rusb", "libusb", "evdev", "udev", "serialport"])
+        || src_files.iter().any(|x| {
+            let l = x.to_ascii_lowercase();
+            l.contains("hidraw") || l.contains("usb")
+        });
+    if p.devices {
+        p.notes.push("Accès direct au matériel (USB/HID) détecté : la permission « tous les périphériques » est accordée.".into());
+    }
     let has_bin_file = src_files.iter().any(|x| {
         let l = x.to_ascii_lowercase();
         l == "src/main.rs" || l.starts_with("src/bin/")
@@ -733,7 +770,7 @@ fn cargo(f: &BuildFile, fallback: &str, src_files: &[String]) -> SourceProject {
     if !workspace && bins.is_empty() && !has_bin_file {
         p.blocker = Some("Ce projet Rust ne contient pas de programme (ni src/main.rs, ni section [[bin]]) : c'est une bibliothèque, il n'y a rien à lancer.".into());
     }
-    if workspace {
+    if workspace && !workspace_gui_bin {
         p.notes.push("Espace de travail Cargo : indiquez le nom du binaire à installer.".into());
     }
     p.notes.push("Les dépendances Rust sont téléchargées pendant la compilation (crates.io).".into());
@@ -1038,6 +1075,16 @@ mod tests {
         assert!(!p.bin_certain);
         assert_eq!(p.bin_name, "mon-projet");
         assert!(!p.notes.is_empty());
+    }
+
+    #[test]
+    fn cargo_workspace_finds_gui_member_and_usb() {
+        let root = bf("cargo.toml", "[workspace]\nmembers = [\"proto\", \"gui\"]\n");
+        let gui = bf("member:cargo.toml", "[package]\nname = \"xblades-gui\"\n[[bin]]\nname = \"xblades-gui\"\npath = \"src/main.rs\"\n[dependencies]\neframe = \"0.29\"\n");
+        let src = ["proto/src/hidraw.rs".to_string(), "gui/src/main.rs".to_string()];
+        let Some(Detection::Supported(p)) = detect(&[root, gui], &[], false, "x", &src) else { panic!() };
+        assert!(p.gui && p.devices && p.bin_certain);
+        assert_eq!(p.bin_name, "xblades-gui");
     }
 
     #[test]
