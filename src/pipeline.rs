@@ -579,9 +579,6 @@ impl Runner {
                     let mut c = crate::host::cmd("flatpak");
                     c.arg("run");
                     c.arg(format!("--filesystem={}", work.display()));
-                    if let Some(dir) = info.path.parent() {
-                        c.arg(format!("--filesystem={}:ro", dir.display()));
-                    }
                     c.arg("org.flatpak.Builder");
                     c
                 }

@@ -502,7 +502,7 @@ impl BuildConfig {
                 "sources": [
                     {
                         "type": "archive",
-                        "path": info.path.to_string_lossy(),
+                        "path": archive_name(info),
                         "sha256": info.sha256,
                         "strip-components": info.strip_components(),
                         "dest": "app"
@@ -534,7 +534,7 @@ impl BuildConfig {
             .unwrap_or("png");
         let archive = json!({
             "type": "archive",
-            "path": info.path.to_string_lossy(),
+            "path": archive_name(info),
             "sha256": info.sha256,
             "strip-components": info.strip_components()
         });
@@ -787,9 +787,22 @@ fn hsv(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     )
 }
 
+/// Nom de l'archive à l'intérieur du dossier de travail (l'extension sert à détecter le format).
+fn archive_name(info: &ArchiveInfo) -> String {
+    info.path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "source.tar.gz".into())
+}
+
 /// Écrit tous les fichiers nécessaires dans `work` et renvoie le chemin du manifeste.
 pub fn prepare_workdir(cfg: &BuildConfig, info: &ArchiveInfo, work: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(work)?;
+    // L'archive est copiée dans le dossier de travail : son dossier d'origine peut être
+    // inaccessible au builder (portail de documents /run/user/…/doc en Flatpak).
+    let dest = work.join(archive_name(info));
+    std::fs::copy(&info.path, &dest)
+        .map_err(|e| anyhow::anyhow!("copie de l'archive impossible : {e}"))?;
     let (icon_file, icon_dir) = prepare_icon(cfg, info, work)?;
     match cfg.launcher_script() {
         Some(l) => std::fs::write(work.join("launcher.sh"), l)?,
