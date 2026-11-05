@@ -400,6 +400,12 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             push(&mut findings, Severity::Blocker, "Trop de fichiers", format!("L'archive contient plus de {MAX_ENTRIES} entrées."));
             break;
         }
+        // En-têtes étendus (pax) : ajoutés par `git archive`, ils ne sont pas des fichiers de l'archive.
+        let ety = entry.header().entry_type();
+        if ety.is_pax_global_extensions() || ety.is_pax_local_extensions() {
+            count -= 1;
+            continue;
+        }
         let epath = entry.path()?.into_owned();
         let parts = match clean_path(&epath) {
             Ok(p) => p,
@@ -1127,6 +1133,25 @@ mod tests {
         assert_eq!(m["command"], "outil");
         assert_eq!(m["modules"][0]["build-options"]["build-args"][0], "--share=network");
         assert_eq!(m["modules"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn git_archive_pax_header_is_not_a_root_file() {
+        let d = tempfile::tempdir().unwrap();
+        let p = build(d.path(), "outil-1.2.0.tar.gz", |b| {
+            let mut h = tar::Header::new_ustar();
+            h.set_entry_type(tar::EntryType::XGlobalHeader);
+            h.set_path("pax_global_header").unwrap();
+            h.set_size(0);
+            h.set_mode(0o666);
+            h.set_cksum();
+            b.append(&h, &[][..]).unwrap();
+            add(b, "outil-1.2.0/Cargo.toml", b"[package]\nname = \"outil\"\nversion = \"1.2.0\"\n", 0o644);
+            add(b, "outil-1.2.0/src/main.rs", b"fn main(){}", 0o644);
+        });
+        let i = analyze(&p).unwrap();
+        assert_eq!(i.strip_components(), 1);
+        assert!(i.source.is_some(), "l'archive doit être reconnue comme un projet Rust");
     }
 
     #[test]

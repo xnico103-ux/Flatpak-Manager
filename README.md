@@ -106,4 +106,4 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 | `src/history.rs` | historique (`~/.local/share/flatpak-manager/history.json`) |
 | `src/ui/` | interface egui |
 
-Tests : `cargo test` (42 tests).
+Tests : `cargo test` (43 tests).
