@@ -96,6 +96,8 @@ struct Manage {
     error: Option<String>,
     notice: Option<String>,
     manual: bool,
+    /// Élément dont la disparition de la liste doit être confirmée après désinstallation.
+    expect_gone: Option<Installed>,
 }
 
 /// Écran « Mises à jour ».
@@ -401,6 +403,17 @@ impl App {
                 self.mg.rx = None;
                 match r {
                     Ok(v) => {
+                        if let Some(it) = self.mg.expect_gone.take()
+                            && v.iter().any(|x| x.id == it.id && x.branch == it.branch && x.installation == it.installation)
+                        {
+                            let tail: Vec<&str> = self.mg.lines.iter().rev().take(4).map(String::as_str).collect::<Vec<_>>().into_iter().rev().collect();
+                            self.mg.notice = None;
+                            self.mg.error = Some(format!(
+                                "flatpak a répondu « succès », mais {} est toujours installé. Dernières lignes : {}",
+                                it.name,
+                                if tail.is_empty() { "(aucune)".to_string() } else { tail.join(" | ") }
+                            ));
+                        }
                         self.mg.items = v;
                         self.mg.loaded = true;
                         if std::mem::take(&mut self.mg.manual) {
@@ -1807,6 +1820,7 @@ impl App {
                     vec![]
                 };
                 if !plan.is_empty() {
+                    self.mg.expect_gone = self.mg.pending.clone();
                     self.mg_run(plan);
                 }
             }
