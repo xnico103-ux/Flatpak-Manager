@@ -464,7 +464,8 @@ impl BuildConfig {
                 // .cargo/config.toml…) : si le fichier attendu manque, on prend l'unique exécutable produit.
                 let install = format!(
                     "p=target/release/{bin}; if [ ! -f \"$p\" ]; then \
-                     set -- $(find target -maxdepth 3 -type f -perm -u+x -path '*/release/*' ! -path '*/deps/*' ! -path '*/build/*' ! -path '*/examples/*' ! -path '*/incremental/*' ! -name '*.so' ! -name '*.d' ! -name '*.rlib'); \
+                     all=$(find target -maxdepth 3 -type f -perm -u+x -path '*/release/*' ! -path '*/deps/*' ! -path '*/build/*' ! -path '*/examples/*' ! -path '*/incremental/*' ! -name '*.so' ! -name '*.d' ! -name '*.rlib'); \
+                     set -- $all; if [ \"$#\" -gt 1 ]; then set -- $(echo \"$all\" | grep -i gui); fi; \
                      if [ \"$#\" -eq 1 ]; then echo \"Binaire « {bin} » introuvable, utilisation de $1\"; p=\"$1\"; \
                      else echo \"Binaire « {bin} » introuvable après la compilation. Fichiers produits :\"; find target -maxdepth 3 -type f -perm -u+x -path '*/release/*' ! -path '*/deps/*' ! -path '*/build/*'; exit 1; fi; fi; \
                      install -Dm755 \"$p\" /app/bin/{bin}"
