@@ -9,7 +9,7 @@ anyhow = "1.0.104"
 bzip2 = "0.6.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dirs = "7.0.0"
-eframe = { version = "0.37.0", default-features = false, features = ["clipboard", "default_fonts", "links", "system_fonts", "wayland", "wgpu"] }
+eframe = { version = "0.37.0", default-features = false, features = ["clipboard", "default_fonts", "links", "system_fonts", "wayland", "glow"] }
 egui = "0.37.0"
 flate2 = "1.1.10"
 goblin = { version = "0.10.7", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
