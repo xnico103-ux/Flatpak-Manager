@@ -85,7 +85,7 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 ## Compatibilité
 
 - **KDE et GNOME :** sélecteur via `xdg-desktop-portal`. Sans portail, repli sur `zenity` ou `kdialog`, et un champ permet de coller un chemin.
-- **Wayland :** la bibliothèque de fenêtres (winit 0.30) ne gère pas le glisser-déposer en Wayland natif. Si XWayland est disponible, la fenêtre est lancée en X11. `FLATPAK_MANAGER_WAYLAND=1` force Wayland natif.
+- **Wayland uniquement :** l’application est compilée sans X11 et refuse de démarrer hors d’une session Wayland. La bibliothèque de fenêtres (winit 0.30) ne gère pas encore le glisser-déposer en Wayland natif : utilisez « Parcourir », « Ouvrir avec » ou le champ de chemin.
 - **Dans un Flatpak :** l’application passe par `flatpak-spawn --host`, ce qui demande une permission. Si elle manque, la commande est affichée :
 
   ```bash
@@ -107,7 +107,3 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 | `src/ui/` | interface egui |
 
 Tests : `cargo test` (42 tests).
-
-## Logo
-
-Remplacez `assets/logo.png` (carré, 512×512 conseillé) et recompilez : il sert dans l’application et comme icône de fenêtre.

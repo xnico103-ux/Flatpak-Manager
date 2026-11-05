@@ -896,11 +896,7 @@ impl App {
                 dot_row(ui, SUCCESS, "Binaires précompilés et scripts", "Archives contenant un programme déjà prêt à l'emploi (ELF ou script), avec ou sans bibliothèques embarquées.");
                 dot_row(ui, SUCCESS, "Code source Rust, C/C++ et Go", "Compilé dans le SDK Flatpak. Si le projet ne produit aucun programme, ou si son nom est incertain, l'analyse vous le dit avant toute compilation.");
                 dot_row(ui, DANGER, "AppImage, Java, Node.js, Python", "Non pris en charge pour l'instant : l'analyse l'indiquera clairement avant toute construction.");
-                let dnd = if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("FM_ORIG_WAYLAND_DISPLAY").is_none() {
-                    "Glisser-déposer indisponible dans cette session Wayland native : utilisez « Parcourir » ou collez le chemin ci-dessous."
-                } else {
-                    "Vous pouvez aussi glisser-déposer une archive (.tar.gz, .tar.xz, .tar.zst, .tar.bz2) ou un fichier .flatpak sur la fenêtre."
-                };
+                let dnd = "Le glisser-déposer n'est pas disponible sous Wayland natif : utilisez « Parcourir » ou collez le chemin ci-dessous.";
                 dot_row(ui, ACCENT, "Astuce", dnd);
             });
             card(ui, Some("Ou saisir un chemin"), |ui| {

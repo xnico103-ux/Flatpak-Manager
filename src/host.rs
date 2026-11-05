@@ -49,14 +49,9 @@ pub fn output_timeout(mut c: Command, secs: u64) -> Option<std::process::Output>
     Some(std::process::Output { status, stdout: reader.join().unwrap_or_default(), stderr: Vec::new() })
 }
 
-/// Commande à lancer sur l'hôte. Les programmes lancés retrouvent le WAYLAND_DISPLAY d'origine
-/// (retiré pour notre propre fenêtre, voir main.rs).
+/// Commande à lancer sur l'hôte.
 pub fn cmd(prog: &str) -> Command {
-    let mut c = cmd_inner(prog);
-    if let Some(w) = std::env::var_os("FM_ORIG_WAYLAND_DISPLAY") {
-        c.env("WAYLAND_DISPLAY", w);
-    }
-    c
+    cmd_inner(prog)
 }
 
 fn cmd_inner(prog: &str) -> Command {
