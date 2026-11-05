@@ -73,7 +73,10 @@ pub fn sandbox_blocked() -> Option<String> {
             if !in_sandbox() {
                 return None;
             }
-            let ok = Command::new("flatpak-spawn").args(["--host", "true"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+            // Délai maximal : un portail qui ne répond pas ne doit pas empêcher la fenêtre de s'ouvrir.
+            let mut probe = Command::new("flatpak-spawn");
+            probe.args(["--host", "true"]);
+            let ok = output_timeout(probe, 5).is_some_and(|o| o.status.success());
             if ok { None } else { Some(sandbox_app_id().unwrap_or_else(|| "<identifiant de l'application>".into())) }
         })
         .clone()
