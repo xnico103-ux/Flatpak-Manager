@@ -107,3 +107,7 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 | `src/ui/` | interface egui |
 
 Tests : `cargo test` (43 tests).
+
+## Licence
+
+Flatpak Manager est un logiciel libre distribué sous licence [GNU GPL v3](LICENSE) ou ultérieure.
