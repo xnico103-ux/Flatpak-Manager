@@ -3,10 +3,12 @@
 mod actions;
 mod history_view;
 mod home;
+mod logo;
 mod manage;
 mod poll;
 mod review;
 mod run;
+mod settings_view;
 mod theme;
 mod updates;
 mod widgets;
@@ -19,6 +21,7 @@ use crate::manifest::{self, BuildConfig, CATEGORIES, FileAccess, IconSource, Run
 use crate::pipeline::{
     self, Event, Failure, Handle, Job, Level, Options, Outcome, Phase, VerifyReport,
 };
+use crate::settings::Settings;
 use crate::toolchains::{self, BuildSystem, FlatpakState, HostTool, ToolInstall, ToolMsg};
 use egui::{
     Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Sense, Stroke, TextureHandle, Ui,
@@ -31,7 +34,7 @@ use std::time::{Duration, Instant};
 use theme::*;
 use widgets::*;
 
-pub const LOGO_BYTES: &[u8] = include_bytes!("../../assets/logo.png");
+pub use logo::window_icon;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Intent {
@@ -58,6 +61,7 @@ enum Screen {
     History,
     Manage,
     Updates,
+    Settings,
 }
 
 struct InstallTarget {
@@ -146,11 +150,13 @@ struct Toolchain {
 
 pub struct App {
     ctx: egui::Context,
-    logo: TextureHandle,
+    logo: logo::Logo,
     fallback_icon: TextureHandle,
     screen: Screen,
     advanced: bool,
     opts: Options,
+    settings: Settings,
+    clear_history_ask: bool,
     history: Vec<Entry>,
     error: Option<String>,
     flatpak_rx: Option<Receiver<(bool, bool)>>,
@@ -224,21 +230,12 @@ fn is_bundle(p: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("flatpak"))
 }
 
-fn color_image(bytes: &[u8]) -> Option<egui::ColorImage> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
-}
-
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> Self {
         setup(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
-        let logo_img = color_image(LOGO_BYTES).unwrap_or_else(|| {
-            let g = manifest::generated_icon("flatpak.creator");
-            egui::ColorImage::from_rgba_unmultiplied([256, 256], g.as_raw())
-        });
-        let logo = ctx.load_texture("logo", logo_img, egui::TextureOptions::LINEAR);
+        let settings = Settings::load();
+        ctx.set_zoom_factor(settings.ui_scale);
         let g = manifest::generated_icon("local.flatpak.Placeholder");
         let fallback_icon = ctx.load_texture(
             "fallback_icon",
@@ -270,11 +267,17 @@ impl App {
 
         let mut app = App {
             ctx,
-            logo,
+            logo: logo::Logo::new(),
             fallback_icon,
             screen: Screen::Home,
-            advanced: false,
-            opts: Options::default(),
+            advanced: settings.advanced,
+            opts: Options {
+                system_install: settings.system_install,
+                replace_existing: settings.replace_existing,
+                confirm_before_install: settings.confirm_before_install,
+            },
+            settings,
+            clear_history_ask: false,
             history: history::load(),
             error: None,
             flatpak_rx: Some(rx),
@@ -334,6 +337,7 @@ impl eframe::App for App {
                 Screen::History => self.ui_history(ui),
                 Screen::Manage => self.ui_manage(ui),
                 Screen::Updates => self.ui_updates(ui),
+                Screen::Settings => self.ui_settings(ui),
             });
         // Indication de dépôt de fichier
         let hovering = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());

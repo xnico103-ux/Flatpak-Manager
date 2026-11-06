@@ -17,7 +17,11 @@ cargo build --release
 mkdir -p "$APPDIR/usr/bin" "$OUT"
 install -Dm755 target/release/flatpak-manager "$APPDIR/usr/bin/flatpak-manager"
 install -Dm644 assets/logo.png "$APPDIR/flatpak-manager.png"
-install -Dm644 assets/logo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/flatpak-manager.png"
+# Une icône par taille : le bureau choisit la plus proche au lieu de réduire un grand fichier.
+for icon in assets/icons/*x*.png; do
+  size="$(basename "$icon" .png)"
+  install -Dm644 "$icon" "$APPDIR/usr/share/icons/hicolor/$size/apps/flatpak-manager.png"
+done
 install -Dm644 packaging/flatpak-manager.desktop "$APPDIR/flatpak-manager.desktop"
 install -Dm644 packaging/flatpak-manager.desktop "$APPDIR/usr/share/applications/flatpak-manager.desktop"
 install -Dm755 packaging/flatpak-manager-servicemenu.desktop "$APPDIR/usr/share/kio/servicemenus/flatpak-manager-servicemenu.desktop" 2>/dev/null || true

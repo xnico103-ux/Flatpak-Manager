@@ -3,14 +3,26 @@
 use super::*;
 
 impl App {
+    /// Écrans accessibles depuis la barre latérale (par opposition au parcours de création).
+    pub(super) fn is_sub_screen(&self) -> bool {
+        matches!(
+            self.screen,
+            Screen::History | Screen::Manage | Screen::Updates | Screen::Settings
+        )
+    }
+
     pub(super) fn sidebar(&mut self, ui: &mut Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(&self.logo)
-                    .fit_to_exact_size(vec2(40.0, 40.0))
-                    .corner_radius(10),
-            );
+            if let Some(tex) = self.logo.texture(ui.ctx(), 40.0) {
+                ui.add(
+                    egui::Image::new(tex)
+                        .fit_to_exact_size(vec2(40.0, 40.0))
+                        .corner_radius(10),
+                );
+            } else {
+                ui.add_space(40.0);
+            }
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.label(RichText::new("Flatpak").strong().size(17.0));
@@ -19,20 +31,7 @@ impl App {
         });
         ui.add_space(22.0);
         let busy = matches!(self.screen, Screen::Running);
-        if nav_item(
-            ui,
-            "Accueil",
-            !matches!(
-                self.screen,
-                Screen::History | Screen::Manage | Screen::Updates
-            ),
-        )
-        .clicked()
-            && !busy
-            && matches!(
-                self.screen,
-                Screen::History | Screen::Manage | Screen::Updates
-            )
+        if nav_item(ui, "Accueil", !self.is_sub_screen()).clicked() && !busy && self.is_sub_screen()
         {
             self.screen = Screen::Home;
         }
@@ -57,6 +56,9 @@ impl App {
         if nav_item(ui, &label, self.screen == Screen::History).clicked() && !busy {
             self.screen = Screen::History;
         }
+        if nav_item(ui, "Paramètres", self.screen == Screen::Settings).clicked() && !busy {
+            self.screen = Screen::Settings;
+        }
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.label(muted(format!("Version {}", env!("CARGO_PKG_VERSION"))).size(11.5));
             ui.add_space(6.0);
@@ -67,6 +69,7 @@ impl App {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if toggle(ui, &mut self.advanced).changed() {
+                        self.save_settings();
                         toast(
                             ui.ctx(),
                             if self.advanced {

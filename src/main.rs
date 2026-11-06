@@ -6,21 +6,12 @@ mod host;
 mod manager;
 mod manifest;
 mod pipeline;
+mod settings;
 mod toolchains;
 mod ui;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-
-fn load_window_icon() -> Option<egui::IconData> {
-    let img = image::load_from_memory(ui::LOGO_BYTES).ok()?.to_rgba8();
-    let (width, height) = (img.width(), img.height());
-    Some(egui::IconData {
-        rgba: img.into_raw(),
-        width,
-        height,
-    })
-}
 
 /// Écrit un message de démarrage dans le journal (utile quand aucune fenêtre n'a pu s'ouvrir).
 fn log_startup(msg: &str) {
@@ -67,7 +58,7 @@ fn main() -> eframe::Result {
         .with_app_id("flatpak-manager")
         .with_inner_size([1100.0, 760.0])
         .with_min_inner_size([980.0, 640.0]);
-    if let Some(icon) = load_window_icon() {
+    if let Some(icon) = ui::window_icon() {
         viewport = viewport.with_icon(Arc::new(icon));
     }
     let options = eframe::NativeOptions {
