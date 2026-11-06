@@ -386,9 +386,10 @@ impl BuildConfig {
             .collect();
         let mut s = String::from("#!/bin/sh\n");
         if !ld.is_empty() {
+            // Les chemins viennent de l'archive : on les protège pour le shell.
             s.push_str(&format!(
-                "export LD_LIBRARY_PATH=\"{}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\n",
-                ld.join(":")
+                "export LD_LIBRARY_PATH={}\"${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\n",
+                sh_quote(&ld.join(":"))
             ));
         }
         let flag = if self.electron { " --no-sandbox" } else { "" };
@@ -421,7 +422,9 @@ impl BuildConfig {
                         "exec python3 {} \"$@\"\n",
                         sh_quote(&format!("{base}/bin/{c}"))
                     )),
-                    Entry::Module(m) => s.push_str(&format!("exec python3 -m {m} \"$@\"\n")),
+                    Entry::Module(m) => {
+                        s.push_str(&format!("exec python3 -m {} \"$@\"\n", sh_quote(m)))
+                    }
                     Entry::None => return None,
                 }
             }
@@ -909,6 +912,49 @@ mod tests {
         let cfg = BuildConfig::from_info(&info);
         let m = prepare_workdir(&cfg, &info, Path::new(&dir)).unwrap();
         println!("manifest: {}", m.display());
+    }
+
+    #[test]
+    fn wrapper_protects_hostile_paths() {
+        let mut cfg = test_config();
+        cfg.lib_dirs = vec!["lib\"; rm -rf ~; \"".into(), String::new()];
+        cfg.exec_rel = "bin/it's".into();
+        let w = cfg.wrapper_script();
+        assert!(
+            w.contains("export LD_LIBRARY_PATH='/app/opt/demo/lib\"; rm -rf ~; \":/app/opt/demo'")
+        );
+        assert!(w.contains("exec '/app/opt/demo/bin/it'\\''s'"));
+    }
+
+    fn test_config() -> BuildConfig {
+        BuildConfig {
+            name: "Demo".into(),
+            app_id: "local.flatpak.Demo".into(),
+            version: "1".into(),
+            summary: String::new(),
+            category: "Utility".into(),
+            exec_rel: "demo".into(),
+            icon: IconSource::Generated,
+            runtime: RuntimeKind::Freedesktop,
+            runtime_version: FDO_VERSION.into(),
+            perms: Permissions {
+                display: true,
+                gpu: true,
+                audio: false,
+                network: false,
+                files: FileAccess::None,
+                removable_media: false,
+                all_devices: false,
+                notifications: false,
+                tray: false,
+                printing: false,
+            },
+            terminal: false,
+            electron: false,
+            lib_dirs: vec![],
+            desktop_exec_code: String::new(),
+            source: None,
+        }
     }
 
     #[test]

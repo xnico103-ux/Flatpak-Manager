@@ -130,7 +130,11 @@ pub fn spawn(job: Job, opts: Options, notify: Arc<dyn Fn() + Send + Sync>) -> Ha
             Ok(o) => Ok(o),
             Err(e) => {
                 let cancelled = runner.cancel.load(Ordering::SeqCst);
-                let tail = runner.tail.lock().unwrap().clone();
+                let tail = runner
+                    .tail
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
                 let mut diagnoses = diagnose(&tail);
                 let msg = if cancelled {
                     "Opération annulée.".to_string()
@@ -188,12 +192,12 @@ impl Runner {
         }
     }
     fn set_plan(&self, p: Vec<Phase>) {
-        *self.plan.lock().unwrap() = p.clone();
+        *self.plan.lock().unwrap_or_else(|e| e.into_inner()) = p.clone();
         self.cur.store(0, Ordering::SeqCst);
         self.emit(Event::Plan(p));
     }
     fn set_phase(&self, ph: Phase) {
-        let plan = self.plan.lock().unwrap().clone();
+        let plan = self.plan.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(i) = plan.iter().position(|p| *p == ph) {
             // Ne jamais revenir en arrière.
             let prev = self.cur.load(Ordering::SeqCst);
@@ -205,7 +209,12 @@ impl Runner {
         }
     }
     fn frac(&self, f: f32) {
-        let n = self.plan.lock().unwrap().len().max(1) as f32;
+        let n = self
+            .plan
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
+            .max(1) as f32;
         let i = self.cur.load(Ordering::SeqCst) as f32;
         self.emit(Event::Progress(((i + f.clamp(0.0, 1.0)) / n).min(1.0)));
     }
@@ -273,9 +282,12 @@ impl Runner {
         if t.trim().is_empty() {
             return;
         }
-        self.tail.lock().unwrap().push(t.to_string());
+        self.tail
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(t.to_string());
         {
-            let mut tail = self.tail.lock().unwrap();
+            let mut tail = self.tail.lock().unwrap_or_else(|e| e.into_inner());
             if tail.len() > 400 {
                 let n = tail.len() - 400;
                 tail.drain(..n);
@@ -368,7 +380,12 @@ impl Runner {
                 let mut go = true;
                 if self.opts.confirm_before_install {
                     self.emit(Event::AwaitConfirm(report));
-                    go = self.confirm_rx.lock().unwrap().recv().unwrap_or(false);
+                    go = self
+                        .confirm_rx
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .recv()
+                        .unwrap_or(false);
                     self.check_cancel()?;
                 }
                 if !go {
@@ -587,12 +604,17 @@ impl Runner {
             c.args(extra);
             c.arg("--repo=repo")
                 .arg("builddir")
-                .arg(manifest.file_name().unwrap());
+                .arg(manifest.file_name().unwrap_or_default());
             self.run_cmd(c, Some(work))
         };
         let mut code = build(&[])?;
         if code != 0 {
-            let t = self.tail.lock().unwrap().join("\n").to_lowercase();
+            let t = self
+                .tail
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .join("\n")
+                .to_lowercase();
             if t.contains("rofiles-fuse") || t.contains("fuse") {
                 self.log(
                     Level::Warn,
@@ -665,7 +687,12 @@ impl Runner {
         }
         let mut code = self.run_cmd(args(already), None)?;
         if code != 0 && self.opts.replace_existing && !already {
-            let t = self.tail.lock().unwrap().join("\n").to_lowercase();
+            let t = self
+                .tail
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .join("\n")
+                .to_lowercase();
             if t.contains("already installed") {
                 self.log(
                     Level::Warn,
