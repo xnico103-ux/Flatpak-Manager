@@ -104,9 +104,9 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 | `src/host.rs` | exécution sur l’hôte quand l’application tourne en Flatpak |
 | `src/diagnose.rs` | explication des erreurs courantes |
 | `src/history.rs` | historique (`~/.local/share/flatpak-manager/history.json`) |
-| `src/ui/` | interface egui |
+| `src/ui/` | interface egui, un fichier par écran (`home`, `review`, `run`, `manage`, `updates`, `history_view`), logique dans `actions` et `poll` |
 
-Tests : `cargo test` (43 tests).
+Tests : `cargo test` (44 tests), vérifiés avec clippy et rustfmt par la CI GitHub Actions.
 
 ## Licence
 
