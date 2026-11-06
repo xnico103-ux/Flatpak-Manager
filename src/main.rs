@@ -1,3 +1,5 @@
+#[macro_use]
+mod i18n;
 mod analyze;
 mod chooser;
 mod diagnose;

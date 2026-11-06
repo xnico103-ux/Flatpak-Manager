@@ -3,6 +3,7 @@
 //! Ce module ne connaît pas l'interface : il lit, valide et écrit un fichier JSON.
 //! Un fichier absent, illisible ou partiel donne simplement les valeurs par défaut.
 
+use crate::i18n::Language;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -22,6 +23,8 @@ pub struct Settings {
     pub confirm_before_install: bool,
     /// Facteur de zoom de l'interface.
     pub ui_scale: f32,
+    /// Langue de l'interface (`Auto` : celle du système).
+    pub language: Language,
 }
 
 impl Default for Settings {
@@ -32,6 +35,7 @@ impl Default for Settings {
             replace_existing: false,
             confirm_before_install: false,
             ui_scale: 1.0,
+            language: Language::Auto,
         }
     }
 }
@@ -111,6 +115,7 @@ mod tests {
             advanced: true,
             system_install: true,
             ui_scale: 1.25,
+            language: Language::En,
             ..Settings::default()
         };
         let json = serde_json::to_string(&s).unwrap();

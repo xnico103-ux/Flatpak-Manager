@@ -235,6 +235,7 @@ impl App {
         setup(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let settings = Settings::load();
+        crate::i18n::set_language(settings.language);
         ctx.set_zoom_factor(settings.ui_scale);
         let g = manifest::generated_icon("local.flatpak.Placeholder");
         let fallback_icon = ctx.load_texture(
