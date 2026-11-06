@@ -367,7 +367,9 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         return Ok(empty_info(path, size, findings, guess_name, guess_version));
     };
 
-    let sha256 = sha256_file(path)?;
+    // Le hash se calcule en parallèle de la lecture de l'archive.
+    let sha_path = path.to_path_buf();
+    let sha_job = std::thread::spawn(move || sha256_file(&sha_path));
 
     let mut ar = tar::Archive::new(decoder);
     let mut count = 0usize;
@@ -495,7 +497,9 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         if mode & 0o6000 != 0 {
             setuid += 1;
         }
-        let fname = parts.last().unwrap().clone();
+        let Some(fname) = parts.last().cloned() else {
+            continue;
+        };
         let lower = fname.to_lowercase();
         let raw = Raw {
             parts: parts.clone(),
@@ -669,7 +673,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             if rel.is_empty() {
                 return None;
             }
-            let fname = r.parts.last().unwrap().clone();
+            let fname = r.parts.last()?.clone();
             let nf = norm(&fname);
             let mut s = 0i32;
             if desktop_exec.as_deref() == Some(fname.as_str()) {
@@ -829,8 +833,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 && (*w == 0 || (16..=1024).contains(w))
         })
         .map(|(r, is_svg, width)| {
-            let stem = Path::new(r.parts.last().unwrap())
-                .file_stem()
+            let stem = r
+                .parts
+                .last()
+                .and_then(|n| Path::new(n).file_stem())
                 .map(|s| norm(&s.to_string_lossy()))
                 .unwrap_or_default();
             let mut s = 0i32;
@@ -1177,7 +1183,9 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     let name = clean_name(&base_name);
     Ok(ArchiveInfo {
         path: path.to_path_buf(),
-        sha256,
+        sha256: sha_job
+            .join()
+            .map_err(|_| anyhow!("calcul de l'empreinte interrompu"))??,
         size,
         unpacked_size: unpacked,
         top_dir,
