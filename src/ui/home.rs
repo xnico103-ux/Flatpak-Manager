@@ -208,8 +208,8 @@ impl App {
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             card(ui, Some(tr!("Ce qui peut être converti")), |ui| {
                 dot_row(ui, SUCCESS, tr!("Binaires précompilés et scripts"), tr!("Archives contenant un programme déjà prêt à l'emploi (ELF ou script), avec ou sans bibliothèques embarquées."));
-                dot_row(ui, SUCCESS, tr!("Code source Rust, C/C++ et Go"), tr!("Compilé dans le SDK Flatpak. Si le projet ne produit aucun programme, ou si son nom est incertain, l'analyse vous le dit avant toute compilation."));
-                dot_row(ui, DANGER, tr!("AppImage, Java, Node.js, Python"), tr!("Non pris en charge pour l'instant : l'analyse l'indiquera clairement avant toute construction."));
+                dot_row(ui, SUCCESS, tr!("Projets Rust, C/C++, Go, Python, Node.js et Java"), tr!("Compilés ou préparés dans le SDK Flatpak, dépendances comprises. Si le projet ne produit aucun programme, ou si son nom est incertain, l'analyse vous le dit avant toute compilation."));
+                dot_row(ui, DANGER, tr!("AppImage, Electron, Maven/Gradle, Ruby, PHP"), tr!("Non pris en charge pour l'instant : l'analyse l'indiquera clairement avant toute construction."));
                 let dnd = tr!("Le glisser-déposer n'est pas disponible sous Wayland natif : utilisez « Parcourir » ou collez le chemin ci-dessous.");
                 dot_row(ui, ACCENT, tr!("Astuce"), dnd);
             });

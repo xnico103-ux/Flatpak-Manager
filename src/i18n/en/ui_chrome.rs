@@ -66,16 +66,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "Archives containing a ready-to-use program (ELF or script), with or without bundled libraries.",
     ),
     (
-        "Code source Rust, C/C++ et Go",
-        "Rust, C/C++ and Go source code",
+        "Projets Rust, C/C++, Go, Python, Node.js et Java",
+        "Rust, C/C++, Go, Python, Node.js and Java projects",
     ),
     (
-        "Compilé dans le SDK Flatpak. Si le projet ne produit aucun programme, ou si son nom est incertain, l'analyse vous le dit avant toute compilation.",
-        "Built in the Flatpak SDK. If the project produces no program, or if its name is uncertain, the analysis tells you before any build.",
+        "Compilés ou préparés dans le SDK Flatpak, dépendances comprises. Si le projet ne produit aucun programme, ou si son nom est incertain, l'analyse vous le dit avant toute compilation.",
+        "Built or prepared in the Flatpak SDK, dependencies included. If the project produces no program, or if its name is uncertain, the analysis tells you before any build.",
     ),
     (
-        "AppImage, Java, Node.js, Python",
-        "AppImage, Java, Node.js, Python",
+        "AppImage, Electron, Maven/Gradle, Ruby, PHP",
+        "AppImage, Electron, Maven/Gradle, Ruby, PHP",
     ),
     (
         "Non pris en charge pour l'instant : l'analyse l'indiquera clairement avant toute construction.",
