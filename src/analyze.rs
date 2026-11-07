@@ -43,7 +43,7 @@ impl Arch {
         match self {
             Arch::X86_64 => "x86_64".into(),
             Arch::Aarch64 => "aarch64".into(),
-            Arch::Other(m) => format!("machine {m}"),
+            Arch::Other(m) => tr!("machine {m}", m = m),
         }
     }
     pub fn matches_host(&self) -> bool {
@@ -101,12 +101,12 @@ pub enum AppKind {
 impl AppKind {
     pub fn label(&self) -> &'static str {
         match self {
-            AppKind::Native => "Binaire natif précompilé",
-            AppKind::Script => "Application à base de script",
-            AppKind::Source => "Code source à compiler",
-            AppKind::Java => "Application Java",
+            AppKind::Native => tr!("Binaire natif précompilé"),
+            AppKind::Script => tr!("Application à base de script"),
+            AppKind::Source => tr!("Code source à compiler"),
+            AppKind::Java => tr!("Application Java"),
             AppKind::AppImage => "AppImage",
-            AppKind::Unknown => "Type inconnu",
+            AppKind::Unknown => tr!("Type inconnu"),
         }
     }
 }
@@ -178,8 +178,8 @@ pub fn clean_path(p: &Path) -> std::result::Result<Vec<String>, String> {
         match c {
             Component::Normal(s) => parts.push(s.to_string_lossy().into_owned()),
             Component::CurDir => {}
-            Component::ParentDir => return Err("contient « .. »".into()),
-            Component::RootDir | Component::Prefix(_) => return Err("chemin absolu".into()),
+            Component::ParentDir => return Err(tr!("contient « .. »").into()),
+            Component::RootDir | Component::Prefix(_) => return Err(tr!("chemin absolu").into()),
         }
     }
     Ok(parts)
@@ -231,7 +231,7 @@ pub fn open_decoder(path: &Path) -> Result<Option<Box<dyn Read>>> {
         Some(Box::new(xz2::read::XzDecoder::new(file()?)))
     } else if m.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         let d = ruzstd::decoding::StreamingDecoder::new(file()?)
-            .map_err(|e| anyhow!("archive zstd invalide : {e}"))?;
+            .map_err(|e| anyhow!(tr!("archive zstd invalide : {e}", e = e)))?;
         Some(Box::new(d))
     } else if m.starts_with(b"BZh") {
         Some(Box::new(bzip2::read::BzDecoder::new(file()?)))
@@ -347,7 +347,8 @@ struct Raw {
 }
 
 pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
-    let meta = std::fs::metadata(path).with_context(|| format!("lecture de {}", path.display()))?;
+    let meta =
+        std::fs::metadata(path).with_context(|| tr!("lecture de {path}", path = path.display()))?;
     let size = meta.len();
     let mut findings: Vec<Finding> = Vec::new();
     let file_name = path
@@ -361,8 +362,8 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Blocker,
-            "Format non pris en charge",
-            "Le fichier n'est pas une archive .tar compressée en gzip, xz, zstd ou bzip2.",
+            tr!("Format non pris en charge"),
+            tr!("Le fichier n'est pas une archive .tar compressée en gzip, xz, zstd ou bzip2."),
         );
         return Ok(empty_info(path, size, findings, guess_name, guess_version));
     };
@@ -400,16 +401,20 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
     // Fichiers .jar : (chemin, chemin brut, taille).
     let mut jar_raw: Vec<(Vec<String>, String, u64)> = Vec::new();
 
-    let entries = ar.entries().context("lecture de l'archive")?;
+    let entries = ar.entries().context(tr!("lecture de l'archive"))?;
     for entry in entries {
-        let mut entry = entry.map_err(|e| anyhow!("archive corrompue ou tronquée : {e}"))?;
+        let mut entry =
+            entry.map_err(|e| anyhow!(tr!("archive corrompue ou tronquée : {e}", e = e)))?;
         count += 1;
         if count > MAX_ENTRIES {
             push(
                 &mut findings,
                 Severity::Blocker,
-                "Trop de fichiers",
-                format!("L'archive contient plus de {MAX_ENTRIES} entrées."),
+                tr!("Trop de fichiers"),
+                tr!(
+                    "L'archive contient plus de {max} entrées.",
+                    max = MAX_ENTRIES
+                ),
             );
             break;
         }
@@ -443,7 +448,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             if symlinks.contains(&prefix) {
                 unsafe_paths += 1;
                 if unsafe_example.is_empty() {
-                    unsafe_example = format!("{} (passe par un lien symbolique)", epath.display());
+                    unsafe_example = tr!(
+                        "{path} (passe par un lien symbolique)",
+                        path = epath.display()
+                    );
                 }
                 break;
             }
@@ -463,10 +471,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             {
                 unsafe_paths += 1;
                 if unsafe_example.is_empty() {
-                    unsafe_example = format!(
-                        "{} → {} (lien hors de l'archive)",
-                        epath.display(),
-                        target.display()
+                    unsafe_example = tr!(
+                        "{path} → {target} (lien hors de l'archive)",
+                        path = epath.display(),
+                        target = target.display()
                     );
                 }
             }
@@ -489,8 +497,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             push(
                 &mut findings,
                 Severity::Blocker,
-                "Archive trop volumineuse une fois décompressée",
-                format!("Plus de {} Gio décompressés.", MAX_UNPACKED >> 30),
+                tr!("Archive trop volumineuse une fois décompressée"),
+                tr!(
+                    "Plus de {size} Gio décompressés.",
+                    size = MAX_UNPACKED >> 30
+                ),
             );
             break;
         }
@@ -602,9 +613,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Blocker,
-            "Chemins dangereux dans l'archive",
-            format!(
-                "{unsafe_paths} entrée(s) tentent d'écrire hors du dossier d'extraction ou à travers un lien symbolique, par exemple : {unsafe_example}. Archive refusée par sécurité."
+            tr!("Chemins dangereux dans l'archive"),
+            tr!(
+                "{unsafe_paths} entrée(s) tentent d'écrire hors du dossier d'extraction ou à travers un lien symbolique, par exemple : {unsafe_example}. Archive refusée par sécurité.",
+                unsafe_paths = unsafe_paths,
+                unsafe_example = unsafe_example
             ),
         );
     }
@@ -612,25 +625,29 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Blocker,
-            "Fichiers spéciaux",
-            format!("{special} fichier(s) de périphérique ou tube nommé : refusés par sécurité."),
+            tr!("Fichiers spéciaux"),
+            tr!(
+                "{special} fichier(s) de périphérique ou tube nommé : refusés par sécurité.",
+                special = special
+            ),
         );
     }
     if size > 0 && unpacked > (1 << 30) && unpacked / size.max(1) > 1000 {
         push(
             &mut findings,
             Severity::Blocker,
-            "Taux de compression suspect",
-            "Possible « bombe de décompression ».",
+            tr!("Taux de compression suspect"),
+            tr!("Possible « bombe de décompression »."),
         );
     }
     if setuid > 0 {
         push(
             &mut findings,
             Severity::Warning,
-            "Bits setuid/setgid",
-            format!(
-                "{setuid} fichier(s) ont des bits spéciaux ; ils sont sans effet dans Flatpak."
+            tr!("Bits setuid/setgid"),
+            tr!(
+                "{setuid} fichier(s) ont des bits spéciaux ; ils sont sans effet dans Flatpak.",
+                setuid = setuid
             ),
         );
     }
@@ -904,66 +921,76 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         AppKind::Source => match (&source, unsupported_source) {
             (Some(p), _) => {
                 let title = if p.system.compiles() {
-                    format!("Code source à compiler : {}", p.system.label())
+                    tr!(
+                        "Code source à compiler : {system}",
+                        system = p.system.label()
+                    )
                 } else {
-                    format!("Application {}", p.system.label())
+                    tr!("Application {system}", system = p.system.label())
                 };
                 push(&mut findings, Severity::Info, &title, p.system.intro());
                 if let Some(why) = &p.blocker {
                     push(
                         &mut findings,
                         Severity::Blocker,
-                        "Aucun programme à compiler",
+                        tr!("Aucun programme à compiler"),
                         why.clone(),
                     );
                 } else if !p.bin_certain {
                     push(
                         &mut findings,
                         Severity::Warning,
-                        "Nom du binaire à confirmer",
-                        format!(
-                            "Le programme installé s'appellerait « {} », mais ce nom est deviné. Vous devrez le confirmer (ou le corriger) avant de lancer la compilation.",
-                            p.bin_name
+                        tr!("Nom du binaire à confirmer"),
+                        tr!(
+                            "Le programme installé s'appellerait « {name} », mais ce nom est deviné. Vous devrez le confirmer (ou le corriger) avant de lancer la compilation.",
+                            name = p.bin_name
                         ),
                     );
                 }
                 for n in &p.notes {
-                    push(&mut findings, Severity::Info, "Compilation", n.clone());
+                    push(&mut findings, Severity::Info, tr!("Compilation"), n.clone());
                 }
             }
             (None, Some(lang)) => push(
                 &mut findings,
                 Severity::Blocker,
-                &format!("Projet {lang} non pris en charge"),
-                format!(
-                    "Cette archive contient un projet {lang} ; seuls {} sont pris en charge pour l'instant.",
-                    toolchains::SUPPORTED_LANGS
+                &tr!("Projet {lang} non pris en charge", lang = lang),
+                tr!(
+                    "Cette archive contient un projet {lang} ; seuls {supported} sont pris en charge pour l'instant.",
+                    lang = lang,
+                    supported = toolchains::SUPPORTED_LANGS
                 ),
             ),
             (None, None) => push(
                 &mut findings,
                 Severity::Blocker,
-                "Archive de sources",
-                "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go, Python, Node.js, JAR).",
+                tr!("Archive de sources"),
+                tr!(
+                    "Cette archive contient du code source mais aucun système de build reconnu (Cargo, CMake, Meson, Autotools, Makefile, Go, Python, Node.js, JAR)."
+                ),
             ),
         },
         AppKind::AppImage => push(
             &mut findings,
             Severity::Blocker,
-            "AppImage détecté",
-            "L'archive contient un AppImage. Ce format est déjà autonome ; il ne peut pas être converti directement.",
+            tr!("AppImage détecté"),
+            tr!(
+                "L'archive contient un AppImage. Ce format est déjà autonome ; il ne peut pas être converti directement."
+            ),
         ),
         AppKind::Java => push(
             &mut findings,
             Severity::Blocker,
-            "Application Java",
-            "Les fichiers .jar de cette archive n'ont pas de classe principale (Main-Class) : ce sont des bibliothèques, pas un programme qu'on peut lancer.",
+            tr!("Application Java"),
+            tr!(
+                "Les fichiers .jar de cette archive n'ont pas de classe principale (Main-Class) : ce sont des bibliothèques, pas un programme qu'on peut lancer."
+            ),
         ),
         AppKind::Unknown => push(
             &mut findings,
             Severity::Blocker,
-            "Aucun exécutable trouvé",
-            "Impossible de repérer un programme exécutable dans cette archive.",
+            tr!("Aucun exécutable trouvé"),
+            tr!("Impossible de repérer un programme exécutable dans cette archive."),
         ),
         _ => {}
     }
@@ -991,10 +1018,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             push(
                 &mut findings,
                 Severity::Blocker,
-                "Archive non prévue pour être convertie",
-                format!(
-                    "Le seul programme trouvé est « {} », qui ressemble à un script d'installation ou de compilation, pas à une application.",
-                    m.rel
+                tr!("Archive non prévue pour être convertie"),
+                tr!(
+                    "Le seul programme trouvé est « {name} », qui ressemble à un script d'installation ou de compilation, pas à une application.",
+                    name = m.rel
                 ),
             );
         }
@@ -1008,8 +1035,8 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Info,
-            "Exécutable principal",
-            format!("{} ({})", m.rel, kind.label()),
+            tr!("Exécutable principal"),
+            tr!("{file} ({kind})", file = m.rel, kind = kind.label()),
         );
         if executables.len() > 1 {
             let others = executables
@@ -1022,8 +1049,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             push(
                 &mut findings,
                 Severity::Info,
-                &format!("{} autres exécutables détectés", executables.len() - 1),
-                format!("Au besoin, choisissez-en un autre en mode avancé (ex. : {others})."),
+                &tr!("{n} autres exécutables détectés", n = executables.len() - 1),
+                tr!(
+                    "Au besoin, choisissez-en un autre en mode avancé (ex. : {others}).",
+                    others = others
+                ),
             );
         }
         match &m.kind {
@@ -1032,11 +1062,11 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                     push(
                         &mut findings,
                         Severity::Blocker,
-                        "Architecture incompatible",
-                        format!(
-                            "Le binaire est compilé pour {} mais cette machine est en {}.",
-                            arch.label(),
-                            std::env::consts::ARCH
+                        tr!("Architecture incompatible"),
+                        tr!(
+                            "Le binaire est compilé pour {arch} mais cette machine est en {host}.",
+                            arch = arch.label(),
+                            host = std::env::consts::ARCH
                         ),
                     );
                 }
@@ -1044,8 +1074,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                     push(
                         &mut findings,
                         Severity::Blocker,
-                        "Binaire 32 bits",
-                        "Les binaires 32 bits nécessitent l'extension de compatibilité i386 ; non prise en charge.",
+                        tr!("Binaire 32 bits"),
+                        tr!(
+                            "Les binaires 32 bits nécessitent l'extension de compatibilité i386 ; non prise en charge."
+                        ),
                     );
                 }
                 if m.size <= MAX_ELF_PARSE {
@@ -1069,15 +1101,15 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                                 push(
                                     &mut findings,
                                     Severity::Warning,
-                                    "Dépendances non analysées",
-                                    "L'en-tête ELF n'a pas pu être lu entièrement.",
+                                    tr!("Dépendances non analysées"),
+                                    tr!("L'en-tête ELF n'a pas pu être lu entièrement."),
                                 );
                             }
                         }
                         Err(e) => push(
                             &mut findings,
                             Severity::Warning,
-                            "Dépendances non analysées",
+                            tr!("Dépendances non analysées"),
                             e.to_string(),
                         ),
                     }
@@ -1092,9 +1124,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                     push(
                         &mut findings,
                         Severity::Warning,
-                        "Interpréteur à vérifier",
-                        format!(
-                            "Le script utilise « {interpreter} ». Cet interpréteur doit exister dans le runtime ou être embarqué dans l'archive."
+                        tr!("Interpréteur à vérifier"),
+                        tr!(
+                            "Le script utilise « {interpreter} ». Cet interpréteur doit exister dans le runtime ou être embarqué dans l'archive.",
+                            interpreter = interpreter
                         ),
                     );
                 }
@@ -1139,10 +1172,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Warning,
-            "Bibliothèques possiblement manquantes",
-            format!(
-                "Non embarquées et absentes du runtime standard (analyse heuristique) : {}.",
-                missing_libs.join(", ")
+            tr!("Bibliothèques possiblement manquantes"),
+            tr!(
+                "Non embarquées et absentes du runtime standard (analyse heuristique) : {libs}.",
+                libs = missing_libs.join(", ")
             ),
         );
     }
@@ -1150,8 +1183,10 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         push(
             &mut findings,
             Severity::Warning,
-            "Application Electron détectée",
-            "Le bac à sable Chromium ne fonctionne pas sans composant supplémentaire ; l'application sera lancée avec --no-sandbox (le bac à sable Flatpak reste actif).",
+            tr!("Application Electron détectée"),
+            tr!(
+                "Le bac à sable Chromium ne fonctionne pas sans composant supplémentaire ; l'application sera lancée avec --no-sandbox (le bac à sable Flatpak reste actif)."
+            ),
         );
     }
     if matches!(kind, AppKind::Native | AppKind::Script) {
@@ -1159,23 +1194,29 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
             push(
                 &mut findings,
                 Severity::Info,
-                "Application graphique",
-                "Accès à l'affichage et à l'accélération graphique proposés par défaut.",
+                tr!("Application graphique"),
+                tr!("Accès à l'affichage et à l'accélération graphique proposés par défaut."),
             );
         } else {
             push(
                 &mut findings,
                 Severity::Info,
-                "Application en ligne de commande probable",
-                "Aucune bibliothèque graphique détectée : l'entrée de menu s'ouvrira dans un terminal.",
+                tr!("Application en ligne de commande probable"),
+                tr!(
+                    "Aucune bibliothèque graphique détectée : l'entrée de menu s'ouvrira dans un terminal."
+                ),
             );
         }
     }
     push(
         &mut findings,
         Severity::Info,
-        "Contenu",
-        format!("{count} fichiers, {} Mio décompressés.", unpacked >> 20),
+        tr!("Contenu"),
+        tr!(
+            "{count} fichiers, {size} Mio décompressés.",
+            count = count,
+            size = unpacked >> 20
+        ),
     );
     // Tri : blocages d'abord
     findings.sort_by_key(|b| std::cmp::Reverse(b.severity));
@@ -1185,7 +1226,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
         path: path.to_path_buf(),
         sha256: sha_job
             .join()
-            .map_err(|_| anyhow!("calcul de l'empreinte interrompu"))??,
+            .map_err(|_| anyhow!(tr!("calcul de l'empreinte interrompu")))??,
         size,
         unpacked_size: unpacked,
         top_dir,
@@ -1329,7 +1370,7 @@ fn jar_has_main_class(data: &[u8]) -> Option<bool> {
 
 pub fn read_member(archive: &Path, raw: &str, max: u64) -> Result<Vec<u8>> {
     let mut ar = tar::Archive::new(
-        open_decoder(archive)?.ok_or_else(|| anyhow!("format d'archive non reconnu"))?,
+        open_decoder(archive)?.ok_or_else(|| anyhow!(tr!("format d'archive non reconnu")))?,
     );
     for e in ar.entries()? {
         let mut e = e?;
@@ -1344,7 +1385,10 @@ pub fn read_member(archive: &Path, raw: &str, max: u64) -> Result<Vec<u8>> {
             return Ok(v);
         }
     }
-    Err(anyhow!("fichier introuvable dans l'archive : {raw}"))
+    Err(anyhow!(tr!(
+        "fichier introuvable dans l'archive : {raw}",
+        raw = raw
+    )))
 }
 
 fn is_gui_lib(l: &str) -> bool {
