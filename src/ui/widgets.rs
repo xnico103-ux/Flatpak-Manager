@@ -42,22 +42,22 @@ pub(super) fn toolchain_card(
     tc: &Toolchain,
     action: &mut Option<&'static str>,
 ) {
-    card(ui, Some("Environnement de compilation"), |ui| {
+    card(ui, Some(tr!("Environnement de compilation")), |ui| {
         ui.horizontal(|ui| {
             badge(ui, system.label(), ACCENT);
-            ui.label(muted("détecté dans l'archive").size(13.0));
+            ui.label(muted(tr!("détecté dans l'archive")).size(13.0));
         });
         ui.add_space(4.0);
         let Some(state) = &tc.state else {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(muted("Analyse de votre système…"));
+                ui.label(muted(tr!("Analyse de votre système…")));
             });
             return;
         };
         if let Some(id) = crate::host::sandbox_blocked() {
             sandbox_banner(ui, &id);
-            if button(ui, "Revérifier", BtnKind::Secondary).clicked() {
+            if button(ui, tr!("Revérifier"), BtnKind::Secondary).clicked() {
                 *action = Some("tc_rescan");
             }
             return;
@@ -66,22 +66,24 @@ pub(super) fn toolchain_card(
             dot_row(
                 ui,
                 DANGER,
-                "Flatpak est introuvable",
-                "Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis cliquez sur « Revérifier ».",
+                tr!("Flatpak est introuvable"),
+                tr!(
+                    "Installez le paquet « flatpak » avec votre gestionnaire de paquets, puis cliquez sur « Revérifier »."
+                ),
             );
-            if button(ui, "Revérifier", BtnKind::Secondary).clicked() {
+            if button(ui, tr!("Revérifier"), BtnKind::Secondary).clicked() {
                 *action = Some("tc_rescan");
             }
             return;
         }
         if !tc.tools.is_empty() {
-            ui.label(RichText::new("Sur votre machine").strong());
+            ui.label(RichText::new(tr!("Sur votre machine")).strong());
             for t in &tc.tools {
                 let (c, d) = match &t.version {
                     Some(v) => (SUCCESS, v.clone()),
                     None => (
                         MUTED,
-                        "non trouvé (sans importance : la compilation utilise le SDK Flatpak)"
+                        tr!("non trouvé (sans importance : la compilation utilise le SDK Flatpak)")
                             .to_string(),
                     ),
                 };
@@ -89,25 +91,25 @@ pub(super) fn toolchain_card(
             }
             ui.add_space(6.0);
         }
-        ui.label(RichText::new("Composants Flatpak requis").strong());
+        ui.label(RichText::new(tr!("Composants Flatpak requis")).strong());
         let comps = toolchains::components(system, runtime, version, state);
         for c in &comps {
-            let d = format!(
-                "{} — {}",
-                c.reference(),
-                if c.installed { "installé" } else { "manquant" }
-            );
+            let d = if c.installed {
+                tr!("{reference} — installé", reference = c.reference())
+            } else {
+                tr!("{reference} — manquant", reference = c.reference())
+            };
             dot_row(ui, if c.installed { SUCCESS } else { DANGER }, &c.label, &d);
         }
         let miss = toolchains::missing(&comps);
         if miss.is_empty() {
             ui.add_space(4.0);
-            ui.label(RichText::new("Tout est prêt pour compiler.").color(SUCCESS));
+            ui.label(RichText::new(tr!("Tout est prêt pour compiler.")).color(SUCCESS));
             cleanup_section(ui, tc, state, version, action);
             return;
         }
         ui.add_space(8.0);
-        ui.label(RichText::new("Commande qui sera exécutée").strong());
+        ui.label(RichText::new(tr!("Commande qui sera exécutée")).strong());
         Frame::new()
             .fill(INPUT)
             .stroke(Stroke::new(1.0, BORDER))
@@ -133,7 +135,7 @@ pub(super) fn toolchain_card(
                         ui.add_space(4.0);
                     });
             });
-        ui.add(egui::Label::new(muted("« -y » évite que Flatpak pose la question dans un terminal. Seul l'utilisateur courant est concerné (--user).").size(12.5)).wrap());
+        ui.add(egui::Label::new(muted(tr!("« -y » évite que Flatpak pose la question dans un terminal. Seul l'utilisateur courant est concerné (--user).")).size(12.5)).wrap());
         if let Some(e) = &tc.error {
             ui.add_space(4.0);
             ui.add(egui::Label::new(RichText::new(e.as_str()).color(DANGER).size(13.0)).wrap());
@@ -155,18 +157,18 @@ pub(super) fn toolchain_card(
                 );
             }
             ui.add_space(4.0);
-            if button(ui, "Annuler", BtnKind::Danger).clicked() {
+            if button(ui, tr!("Annuler"), BtnKind::Danger).clicked() {
                 *action = Some("tc_cancel");
             }
         } else {
             ui.horizontal_wrapped(|ui| {
-                if button(ui, "Installer maintenant", BtnKind::Primary).clicked() {
+                if button(ui, tr!("Installer maintenant"), BtnKind::Primary).clicked() {
                     *action = Some("tc_install");
                 }
-                if button(ui, "Copier la commande", BtnKind::Secondary).clicked() {
+                if button(ui, tr!("Copier la commande"), BtnKind::Secondary).clicked() {
                     *action = Some("tc_copy");
                 }
-                if button(ui, "Revérifier", BtnKind::Ghost).clicked() {
+                if button(ui, tr!("Revérifier"), BtnKind::Ghost).clicked() {
                     *action = Some("tc_rescan");
                 }
             });
@@ -199,7 +201,7 @@ pub(super) fn cleanup_section(
                 .truncate(),
             );
         }
-        if button(ui, "Annuler", BtnKind::Danger).clicked() {
+        if button(ui, tr!("Annuler"), BtnKind::Danger).clicked() {
             *action = Some("tc_cancel");
         }
         return;
@@ -210,10 +212,10 @@ pub(super) fn cleanup_section(
     }
     ui.add_space(10.0);
     ui.separator();
-    ui.label(RichText::new("Ménage des anciens SDK").strong());
-    ui.add(egui::Label::new(muted(format!("{} ancienne(s) version(s) installée(s) pour vous, devenues inutiles car une version plus récente est présente.", cands.len())).size(13.0)).wrap());
+    ui.label(RichText::new(tr!("Ménage des anciens SDK")).strong());
+    ui.add(egui::Label::new(muted(tr!("{n} ancienne(s) version(s) installée(s) pour vous, devenues inutiles car une version plus récente est présente.", n = cands.len())).size(13.0)).wrap());
     if !tc.clean_ask {
-        if button(ui, "Faire le ménage…", BtnKind::Secondary).clicked() {
+        if button(ui, tr!("Faire le ménage…"), BtnKind::Secondary).clicked() {
             *action = Some("tc_clean_ask");
         }
         return;
@@ -221,9 +223,9 @@ pub(super) fn cleanup_section(
     ui.add_space(4.0);
     ui.add(
         egui::Label::new(
-            RichText::new(
-                "⚠ Ces commandes suppriment des composants (réinstallables depuis Flathub) :",
-            )
+            RichText::new(tr!(
+                "⚠ Ces commandes suppriment des composants (réinstallables depuis Flathub) :"
+            ))
             .color(WARN)
             .size(13.0),
         )
@@ -254,13 +256,13 @@ pub(super) fn cleanup_section(
                     ui.add_space(4.0);
                 });
         });
-    ui.add(egui::Label::new(muted("La 2ᵉ commande retire aussi tout runtime qu'aucune application installée n'utilise. Les applications installées ne sont pas touchées.").size(12.5)).wrap());
+    ui.add(egui::Label::new(muted(tr!("La 2ᵉ commande retire aussi tout runtime qu'aucune application installée n'utilise. Les applications installées ne sont pas touchées.")).size(12.5)).wrap());
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
-        if button(ui, "Supprimer maintenant", BtnKind::Danger).clicked() {
+        if button(ui, tr!("Supprimer maintenant"), BtnKind::Danger).clicked() {
             *action = Some("tc_clean");
         }
-        if button(ui, "Annuler", BtnKind::Ghost).clicked() {
+        if button(ui, tr!("Annuler"), BtnKind::Ghost).clicked() {
             *action = Some("tc_clean_no");
         }
     });
@@ -271,8 +273,10 @@ pub(super) fn sandbox_banner(ui: &mut Ui, app_id: &str) {
     banner(
         ui,
         DANGER,
-        "Permission manquante : l'application tourne dans un Flatpak",
-        "Pour gérer les Flatpak de votre machine, elle doit être autorisée à lancer des commandes sur l'hôte. Copiez cette commande dans un terminal, puis relancez l'application :",
+        tr!("Permission manquante : l'application tourne dans un Flatpak"),
+        tr!(
+            "Pour gérer les Flatpak de votre machine, elle doit être autorisée à lancer des commandes sur l'hôte. Copiez cette commande dans un terminal, puis relancez l'application :"
+        ),
     );
     let cmd = crate::host::override_command(app_id);
     ui.horizontal_wrapped(|ui| {
@@ -285,9 +289,9 @@ pub(super) fn sandbox_banner(ui: &mut Ui, app_id: &str) {
             )
             .wrap(),
         );
-        if button(ui, "Copier", BtnKind::Ghost).clicked() {
+        if button(ui, tr!("Copier"), BtnKind::Ghost).clicked() {
             ui.ctx().copy_text(cmd.clone());
-            toast(ui.ctx(), "Commande copiée dans le presse-papiers");
+            toast(ui.ctx(), tr!("Commande copiée dans le presse-papiers"));
         }
     });
     ui.add_space(8.0);
@@ -325,7 +329,7 @@ pub(super) fn history_line(ui: &mut Ui, e: &Entry) {
             if e.success {
                 e.action.label()
             } else {
-                "Échec"
+                tr!("Échec")
             },
             if e.success { ACCENT } else { DANGER },
         );

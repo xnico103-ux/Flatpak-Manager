@@ -13,9 +13,9 @@ pub enum Action {
 impl Action {
     pub fn label(&self) -> &'static str {
         match self {
-            Action::Created => "Créé",
-            Action::Installed => "Installé",
-            Action::CreatedAndInstalled => "Créé et installé",
+            Action::Created => tr!("Créé"),
+            Action::Installed => tr!("Installé"),
+            Action::CreatedAndInstalled => tr!("Créé et installé"),
         }
     }
 }

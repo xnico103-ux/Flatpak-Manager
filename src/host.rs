@@ -99,7 +99,10 @@ pub fn sandbox_blocked() -> Option<String> {
             if ok {
                 None
             } else {
-                Some(sandbox_app_id().unwrap_or_else(|| "<identifiant de l'application>".into()))
+                Some(
+                    sandbox_app_id()
+                        .unwrap_or_else(|| tr!("<identifiant de l'application>").into()),
+                )
             }
         })
         .clone()
