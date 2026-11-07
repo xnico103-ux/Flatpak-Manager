@@ -49,7 +49,7 @@ impl RuntimeKind {
     }
     pub fn label(&self) -> &'static str {
         match self {
-            RuntimeKind::Freedesktop => "Freedesktop (défaut)",
+            RuntimeKind::Freedesktop => tr!("Freedesktop (défaut)"),
             RuntimeKind::Gnome => "GNOME (GTK)",
             RuntimeKind::Kde => "KDE (Qt)",
         }
@@ -73,10 +73,10 @@ impl FileAccess {
     ];
     pub fn label(&self) -> &'static str {
         match self {
-            FileAccess::None => "Aucun (via les sélecteurs de fichiers uniquement)",
-            FileAccess::Downloads => "Téléchargements",
-            FileAccess::DocumentsAndDownloads => "Documents et Téléchargements",
-            FileAccess::Home => "Tout le dossier personnel",
+            FileAccess::None => tr!("Aucun (via les sélecteurs de fichiers uniquement)"),
+            FileAccess::Downloads => tr!("Téléchargements"),
+            FileAccess::DocumentsAndDownloads => tr!("Documents et Téléchargements"),
+            FileAccess::Home => tr!("Tout le dossier personnel"),
         }
     }
 }
@@ -144,12 +144,12 @@ impl Permissions {
     pub fn risks(&self) -> Vec<(Severity, String)> {
         let mut r = Vec::new();
         if self.files == FileAccess::Home {
-            r.push((Severity::Warning, "Accès à tout le dossier personnel (y compris ~/.ssh et ~/.gnupg). Préférez un accès restreint.".into()));
+            r.push((Severity::Warning, tr!("Accès à tout le dossier personnel (y compris ~/.ssh et ~/.gnupg). Préférez un accès restreint.").into()));
         }
         if self.all_devices {
             r.push((
                 Severity::Warning,
-                "Accès à tous les périphériques : affaiblit fortement le bac à sable.".into(),
+                tr!("Accès à tous les périphériques : affaiblit fortement le bac à sable.").into(),
             ));
         }
         if self.network
@@ -158,12 +158,12 @@ impl Permissions {
                 FileAccess::Home | FileAccess::DocumentsAndDownloads
             )
         {
-            r.push((Severity::Info, "Réseau et accès aux fichiers combinés : l'application pourrait envoyer vos fichiers sur Internet.".into()));
+            r.push((Severity::Info, tr!("Réseau et accès aux fichiers combinés : l'application pourrait envoyer vos fichiers sur Internet.").into()));
         }
         if self.removable_media {
             r.push((
                 Severity::Info,
-                "Accès aux clés USB et disques externes.".into(),
+                tr!("Accès aux clés USB et disques externes.").into(),
             ));
         }
         r
@@ -227,6 +227,24 @@ pub const CATEGORIES: [(&str, &str); 9] = [
     ("Education", "Éducation"),
 ];
 
+/// Libellé affiché d'une catégorie freedesktop (l'identifiant, lui, reste tel quel).
+/// Les libellés français de `CATEGORIES` ne servent plus que de repli.
+#[allow(dead_code)]
+pub fn category_label(id: &str) -> &'static str {
+    match id {
+        "Utility" => tr!("Utilitaire"),
+        "Development" => tr!("Développement"),
+        "Graphics" => tr!("Graphisme"),
+        "AudioVideo" => tr!("Audio et vidéo"),
+        "Game" => tr!("Jeu"),
+        "Network" => tr!("Internet"),
+        "Office" => tr!("Bureautique"),
+        "System" => tr!("Système"),
+        "Education" => tr!("Éducation"),
+        _ => tr!("Utilitaire"),
+    }
+}
+
 pub fn slugify(name: &str) -> String {
     let s: String = name
         .to_lowercase()
@@ -254,24 +272,26 @@ pub fn validate_app_id(id: &str) -> Option<String> {
     let parts: Vec<&str> = id.split('.').collect();
     if parts.len() < 3 {
         return Some(
-            "L'identifiant doit avoir au moins trois segments (ex. : org.exemple.App).".into(),
+            tr!("L'identifiant doit avoir au moins trois segments (ex. : org.exemple.App).").into(),
         );
     }
     if id.len() > 255 {
-        return Some("Identifiant trop long.".into());
+        return Some(tr!("Identifiant trop long.").into());
     }
     for p in &parts {
         if p.is_empty() {
-            return Some("Segment vide dans l'identifiant.".into());
+            return Some(tr!("Segment vide dans l'identifiant.").into());
         }
         if p.chars().next().unwrap().is_ascii_digit() {
-            return Some(format!(
-                "Le segment « {p} » ne peut pas commencer par un chiffre."
+            return Some(tr!(
+                "Le segment « {p} » ne peut pas commencer par un chiffre.",
+                p = p
             ));
         }
         if !p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Some(format!(
-                "Le segment « {p} » contient des caractères non autorisés (lettres, chiffres et _ seulement)."
+            return Some(tr!(
+                "Le segment « {p} » contient des caractères non autorisés (lettres, chiffres et _ seulement).",
+                p = p
             ));
         }
     }
@@ -706,7 +726,8 @@ fn prepare_icon(cfg: &BuildConfig, info: &ArchiveInfo, work: &Path) -> Result<(S
         IconSource::File(p) => {
             let is_svg = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
             Some((
-                std::fs::read(p).with_context(|| format!("lecture de l'icône {}", p.display()))?,
+                std::fs::read(p)
+                    .with_context(|| tr!("lecture de l'icône {chemin}", chemin = p.display()))?,
                 is_svg,
             ))
         }
@@ -804,8 +825,9 @@ pub fn prepare_workdir(cfg: &BuildConfig, info: &ArchiveInfo, work: &Path) -> Re
     // L'archive est copiée dans le dossier de travail : son dossier d'origine peut être
     // inaccessible au builder (portail de documents /run/user/…/doc en Flatpak).
     let dest = work.join(archive_name(info));
-    std::fs::copy(&info.path, &dest)
-        .map_err(|e| anyhow::anyhow!("copie de l'archive impossible : {e}"))?;
+    std::fs::copy(&info.path, &dest).map_err(|e| {
+        anyhow::anyhow!(tr!("copie de l'archive impossible : {erreur}", erreur = e))
+    })?;
     let (icon_file, icon_dir) = prepare_icon(cfg, info, work)?;
     match cfg.launcher_script() {
         Some(l) => std::fs::write(work.join("launcher.sh"), l)?,
@@ -828,7 +850,7 @@ pub fn prepare_workdir(cfg: &BuildConfig, info: &ArchiveInfo, work: &Path) -> Re
 pub fn validate(cfg: &BuildConfig, info: &ArchiveInfo) -> Vec<String> {
     let mut v = Vec::new();
     if cfg.name.trim().is_empty() {
-        v.push("Le nom de l'application est vide.".into());
+        v.push(tr!("Le nom de l'application est vide.").into());
     }
     if let Some(e) = validate_app_id(&cfg.app_id) {
         v.push(e);
@@ -841,25 +863,25 @@ pub fn validate(cfg: &BuildConfig, info: &ArchiveInfo) -> Vec<String> {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-'))
         {
-            v.push("Nom du programme invalide (lettres, chiffres, . _ + - seulement).".into());
+            v.push(tr!("Nom du programme invalide (lettres, chiffres, . _ + - seulement).").into());
         }
         if matches!(
             src.system,
             BuildSystem::Python | BuildSystem::Node | BuildSystem::Java
         ) && src.entry == Entry::None
         {
-            v.push("Aucun point d'entrée à lancer n'a été trouvé.".into());
+            v.push(tr!("Aucun point d'entrée à lancer n'a été trouvé.").into());
         }
         if !src.bin_certain {
-            v.push("Confirmez le nom du programme à installer avant de compiler.".into());
+            v.push(tr!("Confirmez le nom du programme à installer avant de compiler.").into());
         }
     } else if cfg.exec_rel.is_empty() {
-        v.push("Aucun exécutable sélectionné.".into());
+        v.push(tr!("Aucun exécutable sélectionné.").into());
     } else if !info.executables.iter().any(|e| e.rel == cfg.exec_rel) {
-        v.push("L'exécutable choisi n'existe pas dans l'archive.".into());
+        v.push(tr!("L'exécutable choisi n'existe pas dans l'archive.").into());
     }
     if cfg.version.trim().is_empty() {
-        v.push("La version est vide.".into());
+        v.push(tr!("La version est vide.").into());
     }
     v
 }

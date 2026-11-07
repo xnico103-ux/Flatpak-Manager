@@ -73,10 +73,10 @@ impl BuildSystem {
 
     pub fn extension_label(&self) -> &'static str {
         match self {
-            BuildSystem::Cargo => "Extension Rust (rustc, cargo)",
-            BuildSystem::Go => "Extension Go",
-            BuildSystem::Node => "Extension Node.js",
-            BuildSystem::Java => "Extension OpenJDK (Java)",
+            BuildSystem::Cargo => tr!("Extension Rust (rustc, cargo)"),
+            BuildSystem::Go => tr!("Extension Go"),
+            BuildSystem::Node => tr!("Extension Node.js"),
+            BuildSystem::Java => tr!("Extension OpenJDK (Java)"),
             _ => "",
         }
     }
@@ -90,16 +90,24 @@ impl BuildSystem {
     pub fn intro(&self) -> &'static str {
         match self {
             BuildSystem::Python => {
-                "Les dépendances Python seront installées dans le bac à sable Flatpak (pip) puis le programme sera empaqueté avec l'interpréteur du runtime."
+                tr!(
+                    "Les dépendances Python seront installées dans le bac à sable Flatpak (pip) puis le programme sera empaqueté avec l'interpréteur du runtime."
+                )
             }
             BuildSystem::Node => {
-                "Les dépendances seront installées (npm) dans le bac à sable Flatpak, puis le programme sera empaqueté avec Node.js fourni par l'extension du SDK."
+                tr!(
+                    "Les dépendances seront installées (npm) dans le bac à sable Flatpak, puis le programme sera empaqueté avec Node.js fourni par l'extension du SDK."
+                )
             }
             BuildSystem::Java => {
-                "Ce programme Java est déjà construit : il sera empaqueté tel quel avec un environnement Java (JRE) fourni par l'extension OpenJDK."
+                tr!(
+                    "Ce programme Java est déjà construit : il sera empaqueté tel quel avec un environnement Java (JRE) fourni par l'extension OpenJDK."
+                )
             }
             _ => {
-                "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes."
+                tr!(
+                    "L'archive sera compilée dans le bac à sable Flatpak avec le SDK Freedesktop. La première compilation peut durer plusieurs minutes."
+                )
             }
         }
     }
@@ -215,7 +223,14 @@ const UNSUPPORTED: &[(&str, &str)] = &[
 ];
 
 /// Langages pris en charge, pour les messages.
+#[allow(dead_code)]
 pub const SUPPORTED_LANGS: &str = "Rust, C/C++, Go, Python, Node.js et Java (JAR)";
+
+/// Même liste que `SUPPORTED_LANGS`, dans la langue active.
+#[allow(dead_code)]
+pub fn supported_langs() -> &'static str {
+    tr!("Rust, C/C++, Go, Python, Node.js et Java (JAR)")
+}
 
 #[derive(Debug, Clone)]
 pub enum Detection {
@@ -382,11 +397,11 @@ pub fn detect(
         );
         if !has_main {
             p.notes.push(
-                "Aucun main.go ni dossier cmd/ : le point d'entrée n'a pas été repéré.".into(),
+                tr!("Aucun main.go ni dossier cmd/ : le point d'entrée n'a pas été repéré.").into(),
             );
         }
         p.notes
-            .push("Les modules Go sont téléchargés pendant la compilation.".into());
+            .push(tr!("Les modules Go sont téléchargés pendant la compilation.").into());
         return Some(Detection::Supported(p));
     }
     if let Some(f) = get("meson.build") {
@@ -401,7 +416,7 @@ pub fn detect(
         );
         if !certain_exe {
             p.notes
-                .push("Nom du binaire déduit du nom du projet.".into());
+                .push(tr!("Nom du binaire déduit du nom du projet.").into());
         }
         return Some(Detection::Supported(p));
     }
@@ -422,7 +437,7 @@ pub fn detect(
         );
         if !literal {
             p.notes
-                .push("Nom du binaire déduit du nom du projet.".into());
+                .push(tr!("Nom du binaire déduit du nom du projet.").into());
         }
         return Some(Detection::Supported(p));
     }
@@ -471,7 +486,7 @@ pub fn detect(
         );
         if !(c && certain) {
             p.notes
-                .push("Nom du binaire déduit du nom du projet.".into());
+                .push(tr!("Nom du binaire déduit du nom du projet.").into());
         }
         return Some(Detection::Supported(p));
     }
@@ -514,7 +529,8 @@ pub fn detect(
             let (n, c) = pick(name, fallback_name);
             let mut p = project(BuildSystem::Make, (n, c), &f.content, &GUI_NATIVE);
             if !c {
-                p.notes.push("Nom du binaire deviné : vérifiez-le.".into());
+                p.notes
+                    .push(tr!("Nom du binaire deviné : vérifiez-le.").into());
             }
             return Some(Detection::Supported(p));
         }
@@ -644,21 +660,22 @@ fn node(f: &BuildFile, fallback: &str, src: &[String]) -> SourceProject {
     p.build_script = build_script;
     p.alternatives = alternatives;
     p.entry = entry.clone().map(Entry::File).unwrap_or_default();
-    p.notes.push("Les dépendances npm sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).".into());
+    p.notes.push(tr!("Les dépendances npm sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).").into());
     if build_script {
-        p.notes
-            .push("Le script « build » de package.json sera exécuté avant l'empaquetage.".into());
+        p.notes.push(
+            tr!("Le script « build » de package.json sera exécuté avant l'empaquetage.").into(),
+        );
     }
     if electron {
-        p.blocker = Some("Ce projet utilise Electron : sa construction depuis les sources n'est pas prise en charge. Utilisez plutôt l'archive de l'application déjà compilée (celle que le projet distribue pour Linux).".into());
+        p.blocker = Some(tr!("Ce projet utilise Electron : sa construction depuis les sources n'est pas prise en charge. Utilisez plutôt l'archive de l'application déjà compilée (celle que le projet distribue pour Linux).").into());
     } else if entry.is_none() {
-        p.blocker = Some("Aucun point d'entrée Node.js trouvé (ni « bin », ni « main », ni « scripts.start », ni index.js) : il n'y a rien à lancer.".into());
+        p.blocker = Some(tr!("Aucun point d'entrée Node.js trouvé (ni « bin », ni « main », ni « scripts.start », ni index.js) : il n'y a rien à lancer.").into());
     } else if let Some(e) = &entry
         && !build_script
         && !src.iter().any(|s| s.eq_ignore_ascii_case(e))
         && !e.contains('/')
     {
-        p.notes.push(format!("Le fichier « {e} » n'a pas été repéré à la racine de l'archive ; vérifiez-le dans « Point d'entrée »."));
+        p.notes.push(tr!("Le fichier « {e} » n'a pas été repéré à la racine de l'archive ; vérifiez-le dans « Point d'entrée ».", e = e));
     }
     let net = [
         "express",
@@ -936,18 +953,18 @@ fn python(
     }
     if matches!(entry, Entry::None) {
         p.blocker = Some(if installable {
-            "Ce projet Python n'installe aucune commande (pas de [project.scripts]) et n'a ni __main__.py ni main.py : c'est une bibliothèque, il n'y a rien à lancer.".into()
+            tr!("Ce projet Python n'installe aucune commande (pas de [project.scripts]) et n'a ni __main__.py ni main.py : c'est une bibliothèque, il n'y a rien à lancer.").into()
         } else {
-            "Aucun point d'entrée Python trouvé (main.py, __main__.py, app.py ou run.py à la racine).".into()
+            tr!("Aucun point d'entrée Python trouvé (main.py, __main__.py, app.py ou run.py à la racine).").into()
         });
     }
     p.entry = entry;
     if !installable && reqs.is_none() {
-        p.notes.push("Aucun requirements.txt ni pyproject.toml : seules les bibliothèques standard de Python seront disponibles.".into());
+        p.notes.push(tr!("Aucun requirements.txt ni pyproject.toml : seules les bibliothèques standard de Python seront disponibles.").into());
     }
-    p.notes.push("Les dépendances Python sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).".into());
+    p.notes.push(tr!("Les dépendances Python sont téléchargées pendant la création du paquet (accès réseau nécessaire à ce moment-là).").into());
     if contains_any(&blob, &["tkinter", "customtkinter"]) {
-        p.notes.push("Tkinter n'est pas toujours fourni par le runtime : si la fenêtre ne s'ouvre pas, ce projet n'est sans doute pas adapté.".into());
+        p.notes.push(tr!("Tkinter n'est pas toujours fourni par le runtime : si la fenêtre ne s'ouvre pas, ce projet n'est sans doute pas adapté.").into());
     }
     Some(p)
 }
@@ -974,7 +991,7 @@ fn java(jars: &[String], fallback: &str) -> SourceProject {
     if sorted.len() > 1 {
         p.alternatives = sorted;
     }
-    p.notes.push("Application graphique supposée : pour un outil en ligne de commande, cochez « Ouvrir dans un terminal » en mode avancé.".into());
+    p.notes.push(tr!("Application graphique supposée : pour un outil en ligne de commande, cochez « Ouvrir dans un terminal » en mode avancé.").into());
     p
 }
 
@@ -1067,21 +1084,22 @@ fn cargo(
         l.contains("hidraw") || l.contains("usb")
     });
     if p.devices {
-        p.notes.push("Accès direct au matériel (USB/HID) détecté : la permission « tous les périphériques » est accordée.".into());
+        p.notes.push(tr!("Accès direct au matériel (USB/HID) détecté : la permission « tous les périphériques » est accordée.").into());
     }
     let has_bin_file = src_files.iter().any(|x| {
         let l = x.to_ascii_lowercase();
         l == "src/main.rs" || l.starts_with("src/bin/")
     });
     if !workspace && bins.is_empty() && !has_bin_file {
-        p.blocker = Some("Ce projet Rust ne contient pas de programme (ni src/main.rs, ni section [[bin]]) : c'est une bibliothèque, il n'y a rien à lancer.".into());
+        p.blocker = Some(tr!("Ce projet Rust ne contient pas de programme (ni src/main.rs, ni section [[bin]]) : c'est une bibliothèque, il n'y a rien à lancer.").into());
     }
     if workspace && !workspace_gui_bin {
         p.notes
-            .push("Espace de travail Cargo : indiquez le nom du binaire à installer.".into());
+            .push(tr!("Espace de travail Cargo : indiquez le nom du binaire à installer.").into());
     }
-    p.notes
-        .push("Les dépendances Rust sont téléchargées pendant la compilation (crates.io).".into());
+    p.notes.push(
+        tr!("Les dépendances Rust sont téléchargées pendant la compilation (crates.io).").into(),
+    );
     p
 }
 
@@ -1314,10 +1332,10 @@ pub fn components(
     state: &FlatpakState,
 ) -> Vec<Component> {
     let mut v = vec![
-        (runtime.platform().to_string(), "Runtime d'exécution"),
+        (runtime.platform().to_string(), tr!("Runtime d'exécution")),
         (
             runtime.sdk().to_string(),
-            "SDK (compilateurs et outils de build)",
+            tr!("SDK (compilateurs et outils de build)"),
         ),
     ];
     if let Some(e) = resolve_extension(system, version, state) {
@@ -1396,13 +1414,17 @@ pub struct ToolInstall {
 
 fn explain(tail: &[String]) -> String {
     if let Some(d) = diagnose(tail).into_iter().next() {
-        return format!("{} : {}", d.title, d.explanation);
+        return tr!(
+            "{titre} : {explication}",
+            titre = d.title,
+            explication = d.explanation
+        );
     }
     tail.iter()
         .rev()
         .find(|l| !l.trim().is_empty())
         .cloned()
-        .unwrap_or_else(|| "L'installation a échoué.".into())
+        .unwrap_or_else(|| tr!("L'installation a échoué.").into())
 }
 
 /// Exécute les commandes l'une après l'autre dans un thread.
@@ -1424,9 +1446,13 @@ pub fn spawn_install(cmds: Vec<Vec<String>>, notify: Arc<dyn Fn() + Send + Sync>
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .process_group(0);
-                let mut child = cmd
-                    .spawn()
-                    .map_err(|e| format!("impossible de lancer {} : {e}", argv[0]))?;
+                let mut child = cmd.spawn().map_err(|e| {
+                    tr!(
+                        "impossible de lancer {programme} : {erreur}",
+                        programme = argv[0],
+                        erreur = e
+                    )
+                })?;
                 let (ltx, lrx) = channel::<String>();
                 let mut readers = Vec::new();
                 if let Some(o) = child.stdout.take() {
@@ -1464,7 +1490,7 @@ pub fn spawn_install(cmds: Vec<Vec<String>>, notify: Arc<dyn Fn() + Send + Sync>
                 }
                 let status = child.wait().map_err(|e| e.to_string())?;
                 if flag.load(Ordering::SeqCst) {
-                    return Err("Opération annulée.".into());
+                    return Err(tr!("Opération annulée.").into());
                 }
                 if !status.success() {
                     return Err(explain(&tail));
