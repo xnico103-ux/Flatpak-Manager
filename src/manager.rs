@@ -61,9 +61,9 @@ pub fn list_installed() -> Result<Vec<Installed>, String> {
             .stderr(Stdio::null())
             .output()
     };
-    let apps = run("--app").map_err(|e| format!("impossible de lancer flatpak : {e}"))?;
+    let apps = run("--app").map_err(|e| tr!("impossible de lancer flatpak : {e}", e = e))?;
     if !apps.status.success() {
-        return Err("flatpak n'a pas pu lister les applications installées.".into());
+        return Err(tr!("flatpak n'a pas pu lister les applications installées.").into());
     }
     let mut v = parse_list(&String::from_utf8_lossy(&apps.stdout), false);
     if let Ok(rt) = run("--runtime") {
@@ -224,7 +224,7 @@ pub fn list_updates() -> Result<Vec<Update>, String> {
         }
     }
     if !any_ok {
-        return Err("Impossible de chercher les mises à jour (connexion à Flathub ?).".into());
+        return Err(tr!("Impossible de chercher les mises à jour (connexion à Flathub ?).").into());
     }
     all.sort_by(|a, b| {
         a.runtime

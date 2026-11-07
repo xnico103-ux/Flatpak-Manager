@@ -41,9 +41,9 @@ fn main() -> eframe::Result {
     }));
     // Wayland uniquement : l'application est compilée sans X11.
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        log_startup(
-            "Flatpak Manager fonctionne uniquement sous Wayland (WAYLAND_DISPLAY est absent). Si l'application tourne en Flatpak, il lui manque la permission --socket=wayland.",
-        );
+        log_startup(tr!(
+            "Flatpak Manager fonctionne uniquement sous Wayland (WAYLAND_DISPLAY est absent). Si l'application tourne en Flatpak, il lui manque la permission --socket=wayland."
+        ));
         std::process::exit(1);
     }
     // Un fichier passé en argument (ex. : « Ouvrir avec » depuis Dolphin) est ouvert directement.
@@ -73,7 +73,7 @@ fn main() -> eframe::Result {
         Box::new(move |cc| Ok(Box::new(ui::App::new(cc, initial)))),
     );
     if let Err(e) = &r {
-        log_startup(&format!("Impossible d'ouvrir la fenêtre : {e}"));
+        log_startup(&tr!("Impossible d'ouvrir la fenêtre : {e}", e = e));
     }
     r
 }

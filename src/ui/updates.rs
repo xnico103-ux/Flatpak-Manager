@@ -5,8 +5,8 @@ use super::*;
 impl App {
     pub(super) fn ui_updates(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.label(RichText::new("Mises à jour").heading().strong());
-        ui.label(muted("Mettez à jour une application ou tout d'un coup. Les commandes lancées sont affichées dans le journal."));
+        ui.label(RichText::new(tr!("Mises à jour")).heading().strong());
+        ui.label(muted(tr!("Mettez à jour une application ou tout d'un coup. Les commandes lancées sont affichées dans le journal.")));
         ui.add_space(10.0);
         if let Some(id) = crate::host::sandbox_blocked() {
             sandbox_banner(ui, &id);
@@ -22,7 +22,7 @@ impl App {
             ui.add_enabled_ui(!busy && n_all > 0, |ui| {
                 if button(
                     ui,
-                    format!("Tout mettre à jour ({n_all})").as_str(),
+                    tr!("Tout mettre à jour ({n})", n = n_all).as_str(),
                     BtnKind::Primary,
                 )
                 .clicked()
@@ -30,13 +30,13 @@ impl App {
                     action = Some(("all", 0));
                 }
             });
-            if button(ui, "Rechercher", BtnKind::Secondary).clicked()
+            if button(ui, tr!("Rechercher"), BtnKind::Secondary).clicked()
                 && !busy
                 && self.up.rx.is_none()
             {
                 action = Some(("reload", 0));
             }
-            ui.checkbox(&mut self.up.show_runtimes, "Afficher les runtimes");
+            ui.checkbox(&mut self.up.show_runtimes, tr!("Afficher les runtimes"));
         });
         ui.add_space(6.0);
         if let Some(e) = &self.up.error {
@@ -60,7 +60,7 @@ impl App {
                         .truncate(),
                     );
                 }
-                if button(ui, "Annuler", BtnKind::Danger).clicked() {
+                if button(ui, tr!("Annuler"), BtnKind::Danger).clicked() {
                     action = Some(("stop", 0));
                 }
             });
@@ -69,7 +69,7 @@ impl App {
         if self.up.rx.is_some() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(muted("Recherche des mises à jour…"));
+                ui.label(muted(tr!("Recherche des mises à jour…")));
             });
         }
         let show_rt = self.up.show_runtimes;
@@ -85,7 +85,7 @@ impl App {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(&u.name).strong());
-                                badge(ui, if u.is_user() { "utilisateur" } else { &u.installation }, if u.is_user() { ACCENT } else { MUTED });
+                                badge(ui, if u.is_user() { tr!("utilisateur") } else { &u.installation }, if u.is_user() { ACCENT } else { MUTED });
                                 if u.runtime {
                                     badge(ui, "runtime", MUTED);
                                 }
@@ -94,7 +94,7 @@ impl App {
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_enabled_ui(!busy, |ui| {
-                                if button(ui, "Mettre à jour", BtnKind::Secondary).clicked() {
+                                if button(ui, tr!("Mettre à jour"), BtnKind::Secondary).clicked() {
                                     action = Some(("one", i));
                                 }
                             });
@@ -106,9 +106,9 @@ impl App {
                 card(ui, None, |ui| {
                     let hidden = n_all - n_apps;
                     if n_all == 0 {
-                        ui.label(RichText::new("Tout est à jour.").color(SUCCESS));
+                        ui.label(RichText::new(tr!("Tout est à jour.")).color(SUCCESS));
                     } else {
-                        ui.label(muted(format!("Aucune application à mettre à jour ({hidden} runtime(s) disponible(s) : cochez « Afficher les runtimes »).")));
+                        ui.label(muted(tr!("Aucune application à mettre à jour ({hidden} runtime(s) disponible(s) : cochez « Afficher les runtimes »).", hidden = hidden)));
                     }
                 });
             }
@@ -132,7 +132,7 @@ impl App {
                 }
             }
             Some(("stop", _)) => {
-                toast(&self.ctx, "Annulation demandée…");
+                toast(&self.ctx, tr!("Annulation demandée…"));
                 if let Some(t) = &self.up.install {
                     t.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
                 }

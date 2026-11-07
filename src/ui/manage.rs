@@ -5,8 +5,8 @@ use super::*;
 impl App {
     pub(super) fn ui_manage(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.label(RichText::new("Gérer les Flatpak").heading().strong());
-        ui.label(muted("Applications et composants installés sur cette machine. La désinstallation est définitive."));
+        ui.label(RichText::new(tr!("Gérer les Flatpak")).heading().strong());
+        ui.label(muted(tr!("Applications et composants installés sur cette machine. La désinstallation est définitive.")));
         ui.add_space(10.0);
         if let Some(id) = crate::host::sandbox_blocked() {
             sandbox_banner(ui, &id);
@@ -19,14 +19,22 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.mg.filter)
-                    .hint_text("Rechercher…")
+                    .hint_text(tr!("Rechercher…"))
                     .desired_width(240.0),
             );
-            ui.checkbox(&mut self.mg.show_runtimes, "Afficher les runtimes et SDK");
-            if button(ui, "Actualiser", BtnKind::Ghost).clicked() && !busy {
+            ui.checkbox(
+                &mut self.mg.show_runtimes,
+                tr!("Afficher les runtimes et SDK"),
+            );
+            if button(ui, tr!("Actualiser"), BtnKind::Ghost).clicked() && !busy {
                 action = Some(("reload", 0));
             }
-            if button(ui, "Retirer les composants inutilisés…", BtnKind::Secondary).clicked()
+            if button(
+                ui,
+                tr!("Retirer les composants inutilisés…"),
+                BtnKind::Secondary,
+            )
+            .clicked()
                 && !busy
             {
                 action = Some(("unused_ask", 0));
@@ -44,12 +52,12 @@ impl App {
         // Confirmation : la commande exacte est affichée avant toute suppression.
         let plan = if let Some(it) = &self.mg.pending {
             Some((
-                format!("Désinstaller {} ?", it.name),
+                tr!("Désinstaller {name} ?", name = it.name),
                 manager::uninstall_plan(it, self.mg.delete_data),
             ))
         } else if self.mg.pending_unused {
             Some((
-                "Retirer les runtimes qu'aucune application n'utilise ?".to_string(),
+                tr!("Retirer les runtimes qu'aucune application n'utilise ?").to_string(),
                 manager::unused_plan(),
             ))
         } else {
@@ -62,12 +70,15 @@ impl App {
                 ui.label(RichText::new(format!("⚠ {title}")).strong().color(WARN));
                 ui.add(
                     egui::Label::new(
-                        muted("Commande destructive : elle sera exécutée telle quelle.").size(13.0),
+                        muted(tr!(
+                            "Commande destructive : elle sera exécutée telle quelle."
+                        ))
+                        .size(13.0),
                     )
                     .wrap(),
                 );
                 if system {
-                    ui.add(egui::Label::new(muted("Installation système : une demande d'authentification peut s'afficher.").size(13.0)).wrap());
+                    ui.add(egui::Label::new(muted(tr!("Installation système : une demande d'authentification peut s'afficher.")).size(13.0)).wrap());
                 }
                 ui.add_space(4.0);
                 for argv in &cmds {
@@ -85,15 +96,15 @@ impl App {
                     ui.add_space(4.0);
                     ui.checkbox(
                         &mut self.mg.delete_data,
-                        "Supprimer aussi les données de l'application (--delete-data)",
+                        tr!("Supprimer aussi les données de l'application (--delete-data)"),
                     );
                 }
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
-                    if button(ui, "Supprimer maintenant", BtnKind::Danger).clicked() {
+                    if button(ui, tr!("Supprimer maintenant"), BtnKind::Danger).clicked() {
                         action = Some(("confirm", 0));
                     }
-                    if button(ui, "Annuler", BtnKind::Ghost).clicked() {
+                    if button(ui, tr!("Annuler"), BtnKind::Ghost).clicked() {
                         action = Some(("cancel", 0));
                     }
                 });
@@ -116,7 +127,7 @@ impl App {
                         .truncate(),
                     );
                 }
-                if button(ui, "Annuler", BtnKind::Danger).clicked() {
+                if button(ui, tr!("Annuler"), BtnKind::Danger).clicked() {
                     action = Some(("stop", 0));
                 }
             });
@@ -126,7 +137,7 @@ impl App {
         if !self.mg.loaded {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(muted("Lecture des paquets installés…"));
+                ui.label(muted(tr!("Lecture des paquets installés…")));
             });
         }
         let q = self.mg.filter.trim().to_lowercase();
@@ -154,7 +165,7 @@ impl App {
                                     badge(
                                         ui,
                                         if it.is_user() {
-                                            "utilisateur"
+                                            tr!("utilisateur")
                                         } else {
                                             &it.installation
                                         },
@@ -174,8 +185,9 @@ impl App {
                                 |ui| {
                                     let is_self = own_id.as_deref() == Some(it.id.as_str());
                                     if is_self {
-                                        ui.label(muted("application en cours").size(12.5));
-                                    } else if button(ui, "Désinstaller…", BtnKind::Danger).clicked()
+                                        ui.label(muted(tr!("application en cours")).size(12.5));
+                                    } else if button(ui, tr!("Désinstaller…"), BtnKind::Danger)
+                                        .clicked()
                                         && !busy
                                     {
                                         action = Some(("ask", i));
@@ -187,7 +199,7 @@ impl App {
                 }
                 if self.mg.loaded && shown == 0 {
                     card(ui, None, |ui| {
-                        ui.label(muted("Aucun paquet à afficher."));
+                        ui.label(muted(tr!("Aucun paquet à afficher.")));
                     });
                 }
             });
@@ -226,7 +238,7 @@ impl App {
                 }
             }
             Some(("stop", _)) => {
-                toast(&self.ctx, "Annulation demandée…");
+                toast(&self.ctx, tr!("Annulation demandée…"));
                 if let Some(t) = &self.mg.install {
                     t.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
                 }

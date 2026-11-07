@@ -292,9 +292,9 @@ pub fn perm_row(
                     badge(
                         ui,
                         if r == Severity::Warning {
-                            "sensible"
+                            tr!("sensible")
                         } else {
-                            "à noter"
+                            tr!("à noter")
                         },
                         severity_color(r),
                     );
