@@ -36,6 +36,8 @@ fn log_startup(msg: &str) {
 }
 
 fn main() -> eframe::Result {
+    // La langue doit être connue avant tout message (démarrage, détection du bac à sable…).
+    i18n::set_language(settings::Settings::load().language);
     std::panic::set_hook(Box::new(|info| {
         log_startup(&format!("Erreur interne : {info}"))
     }));

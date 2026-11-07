@@ -227,24 +227,6 @@ pub const CATEGORIES: [(&str, &str); 9] = [
     ("Education", "Éducation"),
 ];
 
-/// Libellé affiché d'une catégorie freedesktop (l'identifiant, lui, reste tel quel).
-/// Les libellés français de `CATEGORIES` ne servent plus que de repli.
-#[allow(dead_code)]
-pub fn category_label(id: &str) -> &'static str {
-    match id {
-        "Utility" => tr!("Utilitaire"),
-        "Development" => tr!("Développement"),
-        "Graphics" => tr!("Graphisme"),
-        "AudioVideo" => tr!("Audio et vidéo"),
-        "Game" => tr!("Jeu"),
-        "Network" => tr!("Internet"),
-        "Office" => tr!("Bureautique"),
-        "System" => tr!("Système"),
-        "Education" => tr!("Éducation"),
-        _ => tr!("Utilitaire"),
-    }
-}
-
 pub fn slugify(name: &str) -> String {
     let s: String = name
         .to_lowercase()

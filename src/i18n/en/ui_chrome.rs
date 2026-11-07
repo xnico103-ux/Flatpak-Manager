@@ -230,7 +230,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "Ne supprime pas le fichier .flatpak",
         "Does not delete the .flatpak file",
     ),
-    ("Ouverture du dossier…", "Opening folder…"),
     ("Retiré de l'historique", "Removed from history"),
     ("Créé", "Created"),
     ("Installé", "Installed"),

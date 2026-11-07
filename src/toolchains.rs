@@ -222,12 +222,7 @@ const UNSUPPORTED: &[(&str, &str)] = &[
     ("mix.exs", "Elixir"),
 ];
 
-/// Langages pris en charge, pour les messages.
-#[allow(dead_code)]
-pub const SUPPORTED_LANGS: &str = "Rust, C/C++, Go, Python, Node.js et Java (JAR)";
-
-/// Même liste que `SUPPORTED_LANGS`, dans la langue active.
-#[allow(dead_code)]
+/// Langages pris en charge, pour les messages (dans la langue active).
 pub fn supported_langs() -> &'static str {
     tr!("Rust, C/C++, Go, Python, Node.js et Java (JAR)")
 }

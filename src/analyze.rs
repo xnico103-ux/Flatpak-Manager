@@ -958,7 +958,7 @@ pub fn analyze(path: &Path) -> Result<ArchiveInfo> {
                 tr!(
                     "Cette archive contient un projet {lang} ; seuls {supported} sont pris en charge pour l'instant.",
                     lang = lang,
-                    supported = toolchains::SUPPORTED_LANGS
+                    supported = toolchains::supported_langs()
                 ),
             ),
             (None, None) => push(

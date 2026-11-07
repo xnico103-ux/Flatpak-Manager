@@ -205,25 +205,17 @@ mod tests {
     }
 
     #[test]
-    fn macro_forms_in_both_languages() {
-        set_language(Language::Fr);
+    fn macro_and_catalogue() {
+        // La langue active est globale et partagée par tous les tests (certains comparent
+        // des textes français) : on ne la change pas ici, on interroge le catalogue.
         assert_eq!(tr!("Paramètres"), "Paramètres");
         assert_eq!(
             tr!("Historique : {n} entrée(s)", n = 2),
             "Historique : 2 entrée(s)"
         );
-        set_language(Language::En);
-        assert_eq!(tr!("Paramètres"), "Settings");
-        assert_eq!(
-            tr!("Historique : {n} entrée(s)", n = 2),
-            "History: 2 entry(ies)"
-        );
-        // Texte sans traduction : on retombe sur le français.
-        assert_eq!(
-            translate("Texte inconnu du catalogue"),
-            "Texte inconnu du catalogue"
-        );
-        set_language(Language::Fr);
+        let en = catalogue(Language::En).unwrap();
+        assert_eq!(en["Paramètres"], "Settings");
+        assert!(catalogue(Language::Fr).is_none());
     }
 
     // ---- Cohérence entre le code et les catalogues ----

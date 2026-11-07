@@ -32,8 +32,6 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("Utilitaire", "Utility"),
     ("Développement", "Development"),
     ("Graphisme", "Graphics"),
-    ("Audio et vidéo", "Audio and video"),
-    ("Jeu", "Games"),
     ("Internet", "Internet"),
     ("Bureautique", "Office"),
     ("Système", "System"),
