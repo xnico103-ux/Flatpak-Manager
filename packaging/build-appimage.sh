@@ -13,7 +13,7 @@ OUT="dist"
 APPDIR="$(mktemp -d)/FlatpakManager.AppDir"
 trap 'rm -rf "$(dirname "$APPDIR")"' EXIT
 
-cargo build --release
+cargo build --release --locked
 mkdir -p "$APPDIR/usr/bin" "$OUT"
 install -Dm755 target/release/flatpak-manager "$APPDIR/usr/bin/flatpak-manager"
 install -Dm644 assets/logo.png "$APPDIR/flatpak-manager.png"

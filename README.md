@@ -63,7 +63,7 @@ La carte « Environnement de compilation » liste les composants requis, affiche
 ### Compiler
 
 ```bash
-cargo build --release
+cargo build --release --locked
 ./target/release/flatpak-manager
 ```
 
@@ -86,27 +86,43 @@ Produit `dist/Flatpak_Manager-<version>-<arch>.AppImage` (télécharge `appimage
 
 - **KDE et GNOME :** sélecteur via `xdg-desktop-portal`. Sans portail, repli sur `zenity` ou `kdialog`, et un champ permet de coller un chemin.
 - **Wayland uniquement :** l’application est compilée sans X11 et refuse de démarrer hors d’une session Wayland. La bibliothèque de fenêtres (winit 0.30) ne gère pas encore le glisser-déposer en Wayland natif : utilisez « Parcourir », « Ouvrir avec » ou le champ de chemin.
-- **Dans un Flatpak :** l’application passe par `flatpak-spawn --host`, ce qui demande une permission. Si elle manque, la commande est affichée :
+- **Dans un Flatpak :** l’application passe par `flatpak-spawn --host`, ce qui demande une permission (voir [Permissions et sécurité](#permissions-et-sécurité)).
 
-  ```bash
-  flatpak override --user --talk-name=org.freedesktop.Flatpak <identifiant>
-  ```
+## Permissions et sécurité
 
-## Structure
+Flatpak Manager lance `flatpak` et `flatpak-builder` sur votre machine. Voici ce qu'il fait et ce qu'il demande.
 
-| Fichier | Rôle |
-|---|---|
-| `src/analyze.rs` | analyse sécurisée de l’archive, détection du programme, de l’icône, des dépendances |
-| `src/manifest.rs` | manifeste Flatpak, permissions, script de lancement, `.desktop`, icône |
-| `src/pipeline.rs` | exécution de `flatpak-builder` et `flatpak`, progression, annulation, vérification |
-| `src/toolchains.rs` | environnement de compilation, choix du SDK, ménage |
-| `src/manager.rs` | liste, désinstallation et mises à jour |
-| `src/host.rs` | exécution sur l’hôte quand l’application tourne en Flatpak |
-| `src/diagnose.rs` | explication des erreurs courantes |
-| `src/history.rs` | historique (`~/.local/share/flatpak-manager/history.json`) |
-| `src/ui/` | interface egui, un fichier par écran (`home`, `review`, `run`, `manage`, `updates`, `history_view`), logique dans `actions` et `poll` |
+**Lancé directement (hors Flatpak).** Aucune permission particulière : l'application s'exécute avec vos droits d'utilisateur. Elle n'a pas besoin de `root`. Les installations se font par défaut en mode utilisateur (`--user`) ; l'installation pour tout le système est une option, et c'est alors `flatpak` qui demande l'autorisation.
 
-Tests : `cargo test` (44 tests), vérifiés avec clippy et rustfmt par la CI GitHub Actions.
+**Dans un Flatpak.** L'application doit appeler l'hôte avec `flatpak-spawn --host`, ce qui demande la permission D-Bus `org.freedesktop.Flatpak`. Cette permission donne le droit d'exécuter des commandes en dehors du bac à sable : elle équivaut à un accès complet à votre session. Elle n'est donc jamais accordée automatiquement. Si elle manque, l'application affiche la commande à copier :
+
+```bash
+flatpak override --user --talk-name=org.freedesktop.Flatpak <identifiant>
+```
+
+Elle a aussi besoin de `--socket=wayland` pour s'afficher et, pour lire vos archives, d'un accès aux fichiers (le portail de sélection de fichiers suffit).
+
+**Commandes exécutées.** Uniquement `flatpak` (`install`, `uninstall`, `update`, `list`, `info`, `remote-add`, `remote-ls`, `build-bundle`, `run`), `flatpak-builder` et `xdg-open` (pour ouvrir un dossier). Les actions destructives affichent la commande exacte avant d'agir.
+
+**Fichiers écrits.** `~/.config/flatpak-manager/` (paramètres), `~/.local/share/flatpak-manager/` (historique), `~/.cache/flatpak-manager/` (dossier de travail temporaire et journal de démarrage), plus le `.flatpak` que vous demandez.
+
+**Réseau.** L'application elle-même n'envoie aucune donnée. Le réseau est utilisé par `flatpak` (Flathub : runtimes, SDK, mises à jour) et, pour les projets de sources, pendant la construction (téléchargement des dépendances).
+
+**Archives.** Elles sont contrôlées avant tout traitement (voir « Vérifications avant extraction »). Une archive provenant d'une source inconnue reste du code exécuté sur votre machine : ne créez un Flatpak que depuis des archives de confiance.
+
+**Permissions des applications créées.** Elles sont choisies à l'écran de revue (affichage, GPU, audio, réseau, accès aux fichiers, périphériques…) et un avertissement s'affiche pour les choix larges comme « Tout le dossier personnel » ou « Tous les périphériques ».
+
+## Développement
+
+Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour le rôle de chaque module et [CONTRIBUTING.md](CONTRIBUTING.md) pour contribuer.
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+La CI GitHub Actions lance ces trois commandes à chaque *push* et *pull request*. La version de Rust est fixée dans `rust-toolchain.toml` et les dépendances dans `Cargo.lock`, qui est versionné.
 
 ## Licence
 
