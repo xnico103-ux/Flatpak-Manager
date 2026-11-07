@@ -97,9 +97,9 @@ impl App {
                         toast(
                             &self.ctx,
                             if self.tc.error.is_none() {
-                                "Opération terminée"
+                                tr!("Opération terminée")
                             } else {
-                                "Échec : voir le message affiché"
+                                tr!("Échec : voir le message affiché")
                             },
                         );
                         self.tc.progress = 1.0;

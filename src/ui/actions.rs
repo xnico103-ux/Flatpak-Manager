@@ -9,9 +9,10 @@ impl App {
         } else if is_archive(&p) {
             self.start_analysis(p, Intent::Create);
         } else {
-            self.error = Some(format!(
-                "Fichier non reconnu : {} (attendu : archive .tar.gz, .tar.xz, .tar.zst, .tar.bz2 ou fichier .flatpak).",
-                p.file_name()
+            self.error = Some(tr!(
+                "Fichier non reconnu : {nom} (attendu : archive .tar.gz, .tar.xz, .tar.zst, .tar.bz2 ou fichier .flatpak).",
+                nom = p
+                    .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default()
             ));
@@ -38,24 +39,24 @@ impl App {
             let archive_exts = ["gz", "tgz", "xz", "txz", "zst", "bz2", "tbz2"];
             let mut r = match purpose {
                 Purpose::Archive(_) => rfd::FileDialog::new()
-                    .set_title("Choisir une archive")
-                    .add_filter("Archives tar compressées", &archive_exts)
+                    .set_title(tr!("Choisir une archive"))
+                    .add_filter(tr!("Archives tar compressées"), &archive_exts)
                     .set_directory(&dl)
                     .pick_file(),
                 Purpose::Bundle => rfd::FileDialog::new()
-                    .set_title("Choisir un paquet Flatpak")
-                    .add_filter("Paquets Flatpak", &["flatpak"])
+                    .set_title(tr!("Choisir un paquet Flatpak"))
+                    .add_filter(tr!("Paquets Flatpak"), &["flatpak"])
                     .set_directory(&dl)
                     .pick_file(),
                 Purpose::Save(_) => rfd::FileDialog::new()
-                    .set_title("Enregistrer le paquet Flatpak")
-                    .add_filter("Paquet Flatpak", &["flatpak"])
+                    .set_title(tr!("Enregistrer le paquet Flatpak"))
+                    .add_filter(tr!("Paquet Flatpak"), &["flatpak"])
                     .set_directory(&dl)
                     .set_file_name(&default_name)
                     .save_file(),
                 Purpose::Icon => rfd::FileDialog::new()
-                    .set_title("Choisir une icône")
-                    .add_filter("Images", &["png", "svg"])
+                    .set_title(tr!("Choisir une icône"))
+                    .add_filter(tr!("Images"), &["png", "svg"])
                     .pick_file(),
             };
             // Réponse quasi immédiate sans fichier : le portail n'est probablement pas disponible
@@ -63,36 +64,36 @@ impl App {
             if r.is_none() && started.elapsed() < Duration::from_millis(600) {
                 r = match purpose {
                     Purpose::Archive(_) => chooser::open(
-                        "Choisir une archive",
+                        tr!("Choisir une archive"),
                         &dl,
                         &chooser::Filter {
-                            label: "Archives tar compressées",
+                            label: tr!("Archives tar compressées"),
                             exts: &archive_exts,
                         },
                     ),
                     Purpose::Bundle => chooser::open(
-                        "Choisir un paquet Flatpak",
+                        tr!("Choisir un paquet Flatpak"),
                         &dl,
                         &chooser::Filter {
-                            label: "Paquets Flatpak",
+                            label: tr!("Paquets Flatpak"),
                             exts: &["flatpak"],
                         },
                     ),
                     Purpose::Icon => chooser::open(
-                        "Choisir une icône",
+                        tr!("Choisir une icône"),
                         &dl,
                         &chooser::Filter {
-                            label: "Images",
+                            label: tr!("Images"),
                             exts: &["png", "svg"],
                         },
                     ),
                     Purpose::Save(_) => {
                         let f = chooser::Filter {
-                            label: "Paquet Flatpak",
+                            label: tr!("Paquet Flatpak"),
                             exts: &["flatpak"],
                         };
                         // Aucun sélecteur du tout : on enregistre dans le dossier Téléchargements.
-                        chooser::save("Enregistrer le paquet Flatpak", &dl, &default_name, &f)
+                        chooser::save(tr!("Enregistrer le paquet Flatpak"), &dl, &default_name, &f)
                             .or_else(|| {
                                 (!chooser::available()).then(|| unique_path(&dl, &default_name))
                             })
@@ -209,7 +210,7 @@ impl App {
         self.mg.notice = None;
         self.mg.pending = None;
         self.mg.pending_unused = false;
-        toast(&self.ctx, "Désinstallation lancée…");
+        toast(&self.ctx, tr!("Désinstallation lancée…"));
     }
 
     /// Reçoit la liste et suit l'avancement d'une désinstallation.
@@ -239,20 +240,21 @@ impl App {
                             .rev()
                             .collect();
                         self.mg.notice = None;
-                        self.mg.error = Some(format!(
-                            "flatpak a répondu « succès », mais {} est toujours installé. Dernières lignes : {}",
-                            it.name,
-                            if tail.is_empty() {
-                                "(aucune)".to_string()
-                            } else {
-                                tail.join(" | ")
-                            }
+                        let lignes = if tail.is_empty() {
+                            tr!("(aucune)").to_string()
+                        } else {
+                            tail.join(" | ")
+                        };
+                        self.mg.error = Some(tr!(
+                            "flatpak a répondu « succès », mais {nom} est toujours installé. Dernières lignes : {lignes}",
+                            nom = it.name,
+                            lignes = lignes
                         ));
                     }
                     self.mg.items = v;
                     self.mg.loaded = true;
                     if std::mem::take(&mut self.mg.manual) {
-                        toast(&self.ctx, "Liste actualisée");
+                        toast(&self.ctx, tr!("Liste actualisée"));
                     }
                 }
                 Err(e) => {
@@ -275,8 +277,8 @@ impl App {
                     ToolMsg::Done(r) => {
                         match r {
                             Ok(()) => {
-                                self.mg.notice = Some("Désinstallation terminée.".into());
-                                toast(&self.ctx, "Désinstallation terminée");
+                                self.mg.notice = Some(tr!("Désinstallation terminée.").into());
+                                toast(&self.ctx, tr!("Désinstallation terminée"));
                             }
                             Err(e) => self.mg.error = Some(e),
                         }
@@ -310,7 +312,7 @@ impl App {
         self.up.progress = 0.0;
         self.up.error = None;
         self.up.notice = None;
-        toast(&self.ctx, "Mise à jour lancée…");
+        toast(&self.ctx, tr!("Mise à jour lancée…"));
     }
 
     pub(super) fn up_poll(&mut self) {
@@ -326,9 +328,9 @@ impl App {
                         toast(
                             &self.ctx,
                             if n == 0 {
-                                "Tout est à jour".to_string()
+                                tr!("Tout est à jour").to_string()
                             } else {
-                                format!("{n} mise(s) à jour disponible(s)")
+                                tr!("{n} mise(s) à jour disponible(s)", n = n)
                             },
                         );
                     }
@@ -351,8 +353,8 @@ impl App {
                     ToolMsg::Done(r) => {
                         match r {
                             Ok(()) => {
-                                self.up.notice = Some("Mise à jour terminée.".into());
-                                toast(&self.ctx, "Mise à jour terminée");
+                                self.up.notice = Some(tr!("Mise à jour terminée.").into());
+                                toast(&self.ctx, tr!("Mise à jour terminée"));
                             }
                             Err(e) => self.up.error = Some(e),
                         }
@@ -456,7 +458,7 @@ impl App {
             plan: vec![],
             phase: Phase::Prepare,
             progress: 0.0,
-            status: "Démarrage…".into(),
+            status: tr!("Démarrage…").into(),
             log: vec![],
             awaiting: None,
             report: None,
@@ -498,7 +500,7 @@ impl App {
             plan: vec![],
             phase: Phase::Verify,
             progress: 0.0,
-            status: "Démarrage…".into(),
+            status: tr!("Démarrage…").into(),
             log: vec![],
             awaiting: None,
             report: None,

@@ -197,17 +197,18 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 fn human(bytes: u64) -> String {
-    const U: [&str; 4] = ["o", "Kio", "Mio", "Gio"];
     let mut v = bytes as f64;
     let mut i = 0;
     while v >= 1024.0 && i < 3 {
         v /= 1024.0;
         i += 1;
     }
-    if i == 0 {
-        format!("{bytes} o")
-    } else {
-        format!("{v:.1} {}", U[i])
+    let v = format!("{v:.1}");
+    match i {
+        0 => tr!("{bytes} o", bytes = bytes),
+        1 => tr!("{v} Kio", v = v),
+        2 => tr!("{v} Mio", v = v),
+        _ => tr!("{v} Gio", v = v),
     }
 }
 
@@ -362,14 +363,14 @@ impl eframe::App for App {
             painter.text(
                 rect.center() - vec2(0.0, 12.0),
                 egui::Align2::CENTER_CENTER,
-                "Déposez un fichier ici",
+                tr!("Déposez un fichier ici"),
                 egui::FontId::new(26.0, egui::FontFamily::Proportional),
                 TEXT,
             );
             painter.text(
                 rect.center() + vec2(0.0, 22.0),
                 egui::Align2::CENTER_CENTER,
-                "archive .tar.* pour créer, .flatpak pour installer",
+                tr!("archive .tar.* pour créer, .flatpak pour installer"),
                 egui::FontId::new(15.0, egui::FontFamily::Proportional),
                 MUTED,
             );
