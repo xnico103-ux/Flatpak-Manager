@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # La version de Rust est celle de rust-toolchain.toml.
-      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
