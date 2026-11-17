@@ -12,7 +12,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # La version de Rust est celle de rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
